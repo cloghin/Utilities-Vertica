@@ -34,10 +34,12 @@ def exec_memusage(message):
    #get maxconcurrency to plot in graphs
    cur=db.cursor()
    cur.execute("""select * from 
-		(select pool_name, (declared_size_memory_kb_start_value/1024/1024)::integer as memsize,  (limit_memory_kb_start_value/1024/1024)::integer as maxmemsize , 
+		(select pool_name, (declared_size_memory_kb_start_value/1024/1024)::integer as memsize,  
+	        (limit_memory_kb_start_value/1024/1024)::integer as maxmemsize , 
 		planned_concurrency_start_value ,limit_queries_start_value ,
 		row_number() over(partition by pool_name order by time DESC ) RN
- 		FROM dc_resource_pool_status_by_hour where pool_name NOT IN """ + pool_name_not_in + """ and time > current_date - """ + str(args.days) + """ ) x
+ 		FROM dc_resource_pool_status_by_""" + args.grain + """ 
+	 	where pool_name NOT IN """ + pool_name_not_in + """ and time > current_date - """ + str(args.days) + """ ) x
  		where x.rn = 1 order by 1 ASC;""")
 
    rows = cur.fetchall()
@@ -51,11 +53,10 @@ def exec_memusage(message):
    cur = db.cursor()
    cur.execute("set session timezone ='America/New_York';")
 
-   grain=args.grain
 
    cur = db.cursor()
    cur.execute(""" select       pool_name,
-                                date_trunc('""" + grain +"""',time)::timestamp as hour, 
+                                date_trunc('""" + args.grain +"""',time)::timestamp as hour, 
                                 max(reserved_memory_kb_max_value/1024/1024)::integer - 
 				CASE WHEN (max(reserved_memory_kb_max_value - declared_size_memory_kb_start_value)/1024/1024)::integer  > 0 then
                                                 (max(reserved_memory_kb_max_value - declared_size_memory_kb_start_value)/1024/1024)::integer 
@@ -64,7 +65,7 @@ def exec_memusage(message):
                                 		(max(reserved_memory_kb_max_value - declared_size_memory_kb_start_value)/1024/1024)::integer 
                                 	else 0 END as borrowedsize,
                                 max(reserved_queries_max_value) as no_queries
-                                FROM dc_resource_pool_status_by_""" + grain + """ 
+                                FROM dc_resource_pool_status_by_""" + args.grain + """ 
                                 WHERE time > current_date - """ + str(args.days) + """
                                 AND pool_name NOT IN """ + str(pool_name_not_in) + """
                                 GROUP BY 1,2  ORDER by 1,2 DESC; """)
@@ -73,7 +74,7 @@ def exec_memusage(message):
    fig,ax = plt.subplots(no_subplots)
    ax_sec = [a.twinx() for a in ax]
 
-   fig.set_figheight( 2 * no_subplots) 
+   fig.set_figheight( 3 * no_subplots) 
 
    prior_rp = ""
    xdata,ydata1,ydata2,ydata3 = [],[],[],[]
@@ -107,12 +108,12 @@ def exec_memusage(message):
                     ax[i].grid(True)
 
                     # format the ticks
-		    if grain == "minute" :
+		    if args.grain == "minute" :
                     	ax[i].xaxis.set_major_locator(HourLocator())
 			ax[i].xaxis.set_major_formatter(DateFormatter('%d-%H:%M'))
 		    else : # hour
-			ax[i].xaxis.set_major_locator(HourLocator(np.arange(0, 25, 6)))
-                    	ax[i].xaxis.set_major_formatter(DateFormatter('%b %d-%H:%M'))
+			ax[i].xaxis.set_major_locator(DayLocator())
+                    	ax[i].xaxis.set_major_formatter(DateFormatter('%b %d'))
 
                     ax[i].xaxis.set_minor_locator(HourLocator(np.arange(0, 25, 6)))
 
@@ -252,9 +253,6 @@ def exec_spilled(message):
  fig,ax = plt.subplots(1)
  ax_sec = ax.twinx()
  
- fig.set_figheight(30)
- fig.set_figwidth(20)
-
  prior_rp,sti  =  "",1
  xdata,ydata1,ydata2 =  [],[],[]
  for index,row in enumerate(rows):
@@ -270,8 +268,8 @@ def exec_spilled(message):
 		        ydata2.append(int(row[3])) # mem usage
 
                     line, =ax.plot(xdata,ydata1,"-",label= prior_rp,linewidth=2)
-                    ax.set_title('event-pool Query count/Mem usage')
-                    ax.set_ylabel('# of Requests')
+                    ax.set_title('Join/GroupBy SPILL - Query count/Mem usage')
+                    ax.set_ylabel('Query Count')
 		    ax.legend(loc=2,prop={'size':7})
 
                     ax_sec.plot(xdata,ydata2,":",label=prior_rp ,linewidth=2)
@@ -613,7 +611,7 @@ parser.add_argument('--tbname',
                     help='table name in the OBJLOCK report')
 parser.add_argument('--dcschema',
 		    help='schema name for data collector schema')
-parser.add_argument('--grain',
+parser.add_argument('--grain',default='hour',
                     help='grain for mem usage : hour/minute, default hour')
 
 
