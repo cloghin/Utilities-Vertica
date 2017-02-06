@@ -5,8 +5,14 @@ from threading import Thread
 from subprocess import call,PIPE,Popen
 import time
 
+## Need to upgrade the script to use a message queue across multiple hosts 
+## so that we can add workers on new hosts or kill them. can use rabbitMQ on test cluster 
+## and dispatch work on other hosts to get work. May need to add at the beginning of the queue or the end 
+##  of the queue
+
+
 # Set up some global variables
-num_fetch_threads = 7
+num_fetch_threads = 4
 field_delim=""
 null_char  =""
 record_terminator="\n"
@@ -30,7 +36,7 @@ def export_table(i, q):
 		if (not args.drymode):
 		
 			p1 = Popen(vsql_args + [sql] ,stdout=PIPE)	
-			p2 = Popen(["lbzip2"], stdin=p1.stdout, stdout=PIPE)
+			p2 = Popen(["bzip2","--fast"], stdin=p1.stdout, stdout=PIPE)
 			p3 = Popen(["aws","s3","cp","-",s3],stdin=p2.stdout )
 
 			p1.stdout.close()
