@@ -1,5 +1,6 @@
 import argparse,sys
 import hp_vertica_client
+from subprocess import call, PIPE,Popen
 
 import matplotlib
 matplotlib.use('Agg')
@@ -127,7 +128,8 @@ def exec_memusage(message):
         ydata1.append(int(row[2])) # reserved 
         ydata2.append(int(row[3])) # borrowed memory
         ydata3.append(int(row[4])) # concurrency
-
+  
+   x[i].legend(loc=2)
    plt.savefig("MEM")
    cur.close()
 
@@ -579,6 +581,297 @@ def exec_objlock (msg):
   msgImg.add_header('Content-Disposition', 'inline', filename='OBJLOCK.png')
   msg.attach(msgImg)
 
+def exec_license (msg):
+	global args
+	result = []
+	#execute an audit every time we execute the report, this may take some 10-20 min. 
+	cur = db.cursor()
+	cur.execute("""select 'select audit('''||x||''');' FROM (select distinct table_schema as x  from tables UNION ALL select 'gsnmobile.events') T ;""")
+	rows = cur.fetchall()
+	cur.close()
+	for row in rows:
+		print row
+		# UNCOMMENT the audit execution !!!!!
+		cur = db.cursor()
+		cur.execute(row[0])
+		cur.close()
+
+	#studio breakdown
+	cur = db.cursor()
+        cur.execute("""	select  ((X.count/TOT.count)* RAW.gb)::numeric(14,2) as raw_gb,
+			((X.count/TOT.count)* COMP.gb)::numeric(14,2) as comp_gb
+			from 
+			( select  count(*) from gsnmobile.events where app_name = 'TriPeaks Solitaire' ) X 
+		CROSS JOIN  (select size_bytes/1024/1024/1204 as gb from user_audits  where object_schema='gsnmobile' and object_name ='events' and audit_end_timestamp > current_Date -25
+			order by audit_end_timestamp DESC limit 1) RAW  
+		CROSS JOIN (select sum(used_bytes)/1024/1024/1024 as gb from projection_storage where projection_schema='gsnmobile' and anchor_Table_name='events' ) COMP
+		CROSS JOIN (select count(*) from gsnmobile.events ) TOT;""")
+	rows = cur.fetchall()
+        cur.close()
+        for row in rows:
+              tripeaks_raw = row[0]
+	      tripeaks_comp = row[1]
+
+
+	cur = db.cursor()
+        sql="""select RAW.studio, 
+			case RAW.studio WHEN  'Casino Studio' then GB_RAW - """ + str(tripeaks_raw) + """ 
+			    		 WHEN 'Tripeaks Studio' then GB_RAW + """ + str(tripeaks_raw) + """
+			else GB_RAW end as "Raw(GB)",
+			case RAW.studio WHEN  'Casino Studio' then GB_COMP - """ + str(tripeaks_comp) + """ 
+                                         WHEN 'Tripeaks Studio' then GB_COMP + """ + str(tripeaks_comp) + """
+                        else GB_COMP end as "Compressed(GB)"
+			 from (select CASE
+                        WHEN object_name  IN ( 'bingoapp','grandcasino','gsncom','gsnmobile','newapi','plumbee') THEN 'Casino Studio'
+                        WHEN object_name IN ( 'app_wofs','poker') THEN 'Vegas Studio'
+                        WHEN object_name IN ( 'arena','ww') THEN 'Skill Studio'
+                        WHEN object_name IN ( 'bash') THEN 'Bingo Studio'
+                        WHEN object_name IN ( 'tripeaksapp') THEN 'Tripeaks Studio'
+                        ELSE 'Others' END as studio,
+                (sum(size_bytes)/1024/1024/1024)::numeric(14,2) as GB_RAW
+                FROM (
+                        select object_name, max(size_bytes) as size_bytes from user_audits 
+                        where date(audit_end_timestamp) =CURRENT_DATE  and  object_type ='SCHEMA'
+                        GROUP BY 1 ) X 
+                group by 1 ) RAW
+                NATURAL JOIN        
+                (select CASE
+                        WHEN projection_schema IN ( 'bingoapp','grandcasino','gsncom','gsnmobile','newapi','plumbee') THEN 'Casino Studio'
+                        WHEN projection_schema IN ( 'app_wofs','poker') THEN 'Vegas Studio'
+                        WHEN projection_schema IN ( 'arena','ww') THEN 'Skill Studio'
+                        WHEN projection_schema IN ( 'bash') THEN 'Bingo Studio'
+                        WHEN projection_schema IN ( 'tripeaksapp') THEN 'Tripeaks Studio'
+                        ELSE 'Others' END as studio,
+                (sum(used_bytes)/1024/1024/1024)::numeric(14,2) as GB_COMP
+                FROM projection_storage 
+                group by 1) COMP order by 2 DESC;"""
+
+	cur.execute(sql)
+
+	rows = cur.fetchall()
+        cur.close()
+        fig,ax = plt.subplots() 
+
+	xdata,ydata1,ydata2  = [],[],[]
+	for index,row in enumerate(rows):
+        	xdata.append(row[0])       # studio
+                ydata1.append(int(row[1])) # raw_gb
+               	ydata2.append(int(row[2])) # comp_gb
+
+	vsql_args = ["vsql" ,"-h", args.host, "-U","dbadmin","-w",args.password,"-HXc" ]
+	p=Popen(vsql_args + [sql] ,stdout=PIPE)
+	(html,err) = p.communicate()
+	result.append(html)
+
+	ind = np.arange(index + 1)
+	width = 0.45	
+	rects1 = ax.barh(ind,ydata1,width,color='r')
+	rects2 = ax.barh(ind + width, ydata2, width,color='y')
+	# add some text for labels, title and axes ticks
+	ax.set_xlabel('Storage (GB)')
+	ax.set_title('Space usage by studio')
+	ax.set_yticks(ind + width)
+	ax.set_yticklabels(xdata)
+	ax.legend((rects1[0], rects2[0]), ('License', 'Compressed'))
+
+	autolabel(ax, rects1)
+	autolabel(ax, rects2)
+        plt.savefig("STUDIO")
+
+	#build studio piechart
+	fig, ax = plt.subplots()
+	ax.pie(ydata1 , labels=xdata, autopct='%1.1f%%', shadow=True)
+	ax.axis('equal')  # Equal aspect ratio ensures that pie is drawn as a circle.
+	plt.title('License Allocation by Studio', y=1.05)
+	plt.savefig("PIE_STUDIO")
+
+
+	#historical studio report 
+	cur =db.cursor()
+	sql ="""select Y.studio, Y.dt as audit_date,
+			(case Y.studio 	WHEN  'Casino Studio' then GB_RAW - C.tripeaks_events_gb
+                			WHEN 'Tripeaks Studio' then GB_RAW + C.tripeaks_events_gb
+                    			ELSE GB_RAW END)::numeric(14,2) as "Raw(GB)"
+			FROM ( select dt, CASE
+                        		WHEN object_name  IN ( 'bingoapp','grandcasino','gsncom','gsnmobile','newapi','plumbee') THEN 'Casino Studio'
+                        		WHEN object_name IN ( 'app_wofs','poker') THEN 'Vegas Studio'
+                        		WHEN object_name IN ( 'arena','ww') THEN 'Skill Studio'
+                        		WHEN object_name IN ( 'bash') THEN 'Bingo Studio'
+                        		WHEN object_name IN ( 'tripeaksapp') THEN 'Tripeaks Studio'
+                        		ELSE 'Others' END as studio,
+                		(sum(size_bytes)/1024/1024/1024)::numeric(14,2) as  GB_RAW
+                		FROM ( select date(audit_end_timestamp) as dt, object_name, max(size_bytes) as size_bytes from user_audits 
+                        	where object_type ='SCHEMA' GROUP BY 1,2) X GROUP BY 1,2 )  Y
+				NATURAL JOIN (	select A.date as dt , A.gb * B.pct as tripeaks_events_gb from (select date(audit_end_timestamp), avg( size_bytes/1024/1024/1204) as gb 
+				from user_audits where object_schema='gsnmobile' and object_name ='events' group by 1) A 
+				CROSS JOIN 
+			( select  (select count(*) from gsnmobile.events where app_name = 'TriPeaks Solitaire')/(select count(*)  from gsnmobile.events) as pct from dual ) B ) C order by 1;"""
+	cur.execute(sql)
+	rows = cur.fetchall()
+	cur.close()
+	
+	fig,ax = plt.subplots()
+        xdata,ydata,cat  = [],[],""
+        for index,row in enumerate(rows):
+		#start
+        	if cat  == "":
+                 	cat  = row[0]
+		#during
+        	if row[0] != cat or index == len(rows) - 1 : #report based on completion or on last record
+                    if index == len(rows) - 1 : #last row to append first before plotting
+                       #keep the same plot and add a new data point
+                       xdata.append(row[1])       # date
+                       ydata.append(int(row[2]))  # size 
+
+                    line, = ax.plot(xdata,ydata,"-",label=cat ,linewidth=2)
+		    ax.set_title('Historical License usage')
+                    ax.set_ylabel('License(GB)')
+                    ax.legend(loc=1)
+
+                    # format the ticks
+                    ax.xaxis.set_major_locator(DayLocator())
+                    ax.xaxis.set_major_formatter(DateFormatter('%b %d'))
+
+                    xdata,ydata = [],[]
+                    cat  = row[0] #reset rp name
+
+        	#keep the same plot and add a new data point
+        	xdata.append(row[1])      # date
+        	ydata.append(int(row[2])) # size
+   	
+	plt.savefig("STUDIO_HISTORY")
+
+	#print get_html(field_names,xdata,ydata1,ydata2)
+        vsql_args = ["vsql" ,"-h", args.host, "-U","dbadmin","-w",args.password,"-HXc" ]
+        p=Popen(vsql_args + [sql] ,stdout=PIPE)
+        (html,err) = p.communicate()
+        result.append(html)
+
+   	#schema breakdown 
+	cur = db.cursor()
+	sql="""select * from (select object_name as schema,
+        	(sum(size_bytes)/1024/1024/1024)::numeric(14,2) as "RAW(GB)"
+ 		FROM (
+                	select object_name, max(size_bytes) as size_bytes from user_audits 
+                	where date(audit_end_timestamp) = CURRENT_DATE  and  object_type ='SCHEMA'
+                	GROUP BY 1 ) X 
+ 		group by 1 ) RAW
+ 		NATURAL JOIN        
+		(select projection_schema as schema,
+       	 	(sum(used_bytes)/1024/1024/1024)::numeric(14,2) as "COMPRESSED(GB)"
+		FROM projection_storage group by 1) COMP order by 2 DESC ;"""
+	cur.execute(sql)
+	rows = cur.fetchall()
+	cur.close()
+
+	fig,ax = plt.subplots()
+	fig.set_figheight( 15 )
+	xdata,ydata1,ydata2  = [],[],[]
+	for index,row in enumerate(rows):
+                xdata.append(row[0])       # schema
+                ydata1.append(int(row[1])) # raw_gb
+                ydata2.append(int(row[2])) # comp_gb
+
+	ind = np.arange(index + 1)
+        width = 0.35
+        rects1 = ax.barh(ind,ydata1,width,color='r')
+        rects2 = ax.barh(ind + width, ydata2, width,color='y')
+
+
+ 	# add some text for labels, title and axes ticks
+        ax.set_xlabel('Storage (GB)')
+        ax.set_title('Space usage by schema')
+        ax.set_yticks(ind + width)
+        ax.set_yticklabels(xdata)
+        ax.legend((rects1[0], rects2[0]), ('License', 'Compressed'))
+
+	autolabel(ax, rects1)
+	autolabel(ax, rects2)
+        plt.savefig("SCHEMA")
+
+
+	vsql_args = ["vsql" ,"-h", args.host, "-U","dbadmin","-w",args.password,"-HXc" ]
+        p=Popen(vsql_args + [sql] ,stdout=PIPE)
+        (html,err) = p.communicate()
+        result.append(html)
+
+      
+
+	#most recent DB audit 
+	cur = db.cursor()
+	sql=""" select date_trunc('month', audit_start_timestamp)::date,
+        		max((usage_percent*100)::numeric(6,2)) as "license_usage(%)",
+        		max(database_size_bytes/1024/1024/1024/1024)::numeric(10,2) as "db_size(TB)" from license_audits where audited_data ='Total'
+                 	group by 1 order by  1 DESC;"""
+
+	cur.execute(sql)
+	rows=cur.fetchall()
+	cur.close()
+
+	fig,ax = plt.subplots()
+        xdata,ydata1,ydata2  = [],[],[]
+        for index,row in enumerate(rows):
+                xdata.append(row[0])       # month
+                ydata1.append(int(row[1])) # usage % 
+                ydata2.append(int(row[2])) # size TB
+
+        ind = np.arange(index + 1)
+        rects1 = ax.bar(ind,ydata2,width,color='r',label='Raw data')
+
+	# add some text for labels, title and axes ticks
+	ax.xaxis.set_major_locator(DayLocator())
+        ax.xaxis.set_major_formatter(DateFormatter('%b-%Y'))
+
+        ax.set_title('License usage ( db size) over time ')
+	ax.set_ylabel('DB size (TB)')
+        ax.set_xticks(ind + width / 2. )
+        ax.set_xticklabels(xdata, rotation=45)
+	ax.legend(loc=2)
+	
+	ind = 0 
+	for rect in rects1:
+        	height = rect.get_height()
+       		ax.text(rect.get_x() + rect.get_width()/2., 1.05*height,
+                '%s' % str(ydata2[ind]) + "(" + str(ydata1[ind]) + "%)" ,ha='center', va='bottom')
+		ind += 1 
+
+	plt.savefig("LICENSE")
+
+	vsql_args = ["vsql" ,"-h", args.host, "-U","dbadmin","-w",args.password,"-HXc" ]
+        p=Popen(vsql_args + [sql] ,stdout=PIPE)
+        (html,err) = p.communicate()
+        result.append(html)
+
+	html = """<img src="cid:STUDIO"><BR> """ + result[0] + """
+                  <img src="cid:PIE_STUDIO"><BR>
+		  <img src="cid:STUDIO_HISTORY"><BR> """ + result[1] + """
+                  <img src="cid:SCHEMA"><BR> """ + result[2] + """
+                  <img src="cid:LICENSE"><BR>""" + result[3]
+
+	# Record the MIME types.
+	msgHtml = MIMEText(html, 'html')
+	msg.attach(msgHtml)
+
+
+	for i in ['STUDIO','STUDIO_HISTORY','SCHEMA','PIE_STUDIO','LICENSE']:
+		img = open(i + '.png', 'rb').read()
+  		msgImg = MIMEImage(img, 'png')
+  		msgImg.add_header('Content-ID', '<'+i+'>')
+ 		msgImg.add_header('Content-Disposition', 'inline', filename='"+i+".png')
+  		msg.attach(msgImg)
+	
+
+	
+
+
+def autolabel(ax, rects):
+	for rect in rects:
+                #ax.text(rect.get_x() + rect.get_width()/2., 1.05*height,'%d' % int(height),ha='center', va='bottom',rotation=45)
+		xloc = rect.get_width()
+		yloc = rect.get_y() + rect.get_height()/2.0
+        	ax.text( xloc + 10  , yloc, '%s' % '{0:,}'.format(int(xloc))  , ha='left',va='center')
+
+
 def getstyle(s):
  if s <=15:
     style = "-"
@@ -588,6 +881,7 @@ def getstyle(s):
     style = ":"
  return style
 
+
 #main body of script
 
 parser = argparse.ArgumentParser(description='Create charts for vertica historical performance.')
@@ -596,7 +890,7 @@ parser.add_argument('--email',
 parser.add_argument('--days', type=int,
                     help='number of days back from present to capture in the report')
 parser.add_argument('--type',
-                    help='report type to send MEM|LABEL|SPILL|GCL|OBJLOCK|RESWAIT|ALL')
+                    help='report type to send MEM|LABEL|SPILL|GCL|OBJLOCK|RESWAIT|ALL|LICENSE')
 parser.add_argument('--password',
                     help='vertica dbadmin\'s password')
 parser.add_argument('--host',
@@ -639,7 +933,9 @@ msg['From'] = me
 msg['To'] = you
 
 # Create the body of the message.
-html = """\
+
+if args.type <> 'LICENSE' :
+  html = """\
         <p><img src="cid:mem"><BR>
                 <img src="cid:gcl"><BR>
                 <img src="cid:spill"><BR>
@@ -647,10 +943,10 @@ html = """\
 		<img src="cid:reswait"><BR>
 		<img src="cid:objlock"><BR>
         </p>"""
+  # Record the MIME types.
+  msgHtml = MIMEText(html, 'html')
+  msg.attach(msgHtml)
 
-# Record the MIME types.
-msgHtml = MIMEText(html, 'html')
-msg.attach(msgHtml)
 
 # resource pool usage over time ( # queries, reserved_memory) 
 if args.type in ['MEM','ALL']:
@@ -666,12 +962,13 @@ if args.type in ['OBJLOCK','ALL']:
        exec_objlock (msg)
 if args.type in ['RESWAIT','ALL']:
        exec_reswait(msg)
+if args.type in ['LICENSE']:
+       ret = exec_license(msg)
 
 db.close()
 
 if args.email is not None:
-	# Send the message via our own SMTP server, but don't include the envelope header.
+        # Send the message via our own SMTP server, but don't include the envelope header.
         s = smtplib.SMTP('localhost')
         s.sendmail(me,[you],msg.as_string())
         s.quit()
-
