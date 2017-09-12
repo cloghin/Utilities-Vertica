@@ -29,37 +29,48 @@ def exec_memlarge2(message):
    cur.execute("set session timezone ='America/New_York';")
    cur=db.cursor()
 
-   cur.execute(""" SELECT       A.result_type ||'-'|| case C.success when 't' then 'Retried&OK' else 'Failed' END , 
-                                A.pool_name,
-                                A.transaction_id,
-                                A.START,
-                                A.mem_gb  
-                        FROM (
-                        select pool_name, transaction_id,
-                        case
-                                when regexp_like(result,'Granted') then 'Granted' 
-                                 else 'NotGranted' end result_type
-                        ,max(date_trunc('second',start_time))::timestamp AS start
-                        ,max(datediff('second',start_time,time)) AS wait_sec
-                        ,(max(memory_kb/1024/1024))::numeric(14,2) AS mem_GB
-                        FROM """+ str(args.dcschema)  +""".resource_acquisitions
-                                WHERE  time >= current_date - """+ str(args.days)  +""" 
-                                GROUP BY  pool_name, transaction_id, result_type 
-                        ) A
-                        INNER JOIN (select transaction_id, max(statement_id)  statement_id, max(success) AS success FROM """+ str(args.dcschema)  +""".query_summary_hist 
-                        where date(start_timestamp) > current_date -1 - """+ str(args.days)  +"""  AND request_type NOT IN ('TRANSACTION') group by 1)  C USING (transaction_id)
-                        WHERE A.result_type <> 'Granted' -- MEMORY ERRORS 
-                        UNION ALL
-                        SELECT 'Granted', A.*  FROM (
-                        select pool_name , transaction_id,
-                        max(date_trunc('second',start_time))::timestamp AS start
-                        ,(max(memory_kb/1024/1024))::numeric(14,2) AS mem_GB
+   sql =""" SELECT ATABLE.result_type ||'-'|| case CTABLE.success when 't' then 'Retried&OK' else 'Failed' END as result,
+                   ATABLE.pool_name,
+                   ATABLE.transaction_id,
+                   ATABLE.START,
+                   ATABLE.mem_gb
+                   FROM ( SELECT pool_name, transaction_id,
+                          CASE WHEN regexp_like(result,'Granted') then 'Granted'
+                               ELSE 'NotGranted'
+                               END as result_type,
+                        max(date_trunc('second',start_time))::timestamp as start,
+                        max(datediff('second',start_time,time)) as wait_sec,
+                        (max(memory_kb/1024/1024))::numeric(14,2) as mem_GB
                         FROM """+ str(args.dcschema)  +""".resource_acquisitions
                         WHERE  time >= current_date - """+ str(args.days)  +"""
-                        AND RESULT ='Granted'           -- MEMORY GRANTS > BUDGET by 50%.
-                        GROUP BY  pool_name, transaction_id) A
-                        INNER JOIN (select pool_name, avg(query_budget_kb/1024/1024)::numeric(14,2) as budget from resource_pool_status group by 1) B  using(pool_name)
-                        WHERE A.mem_gb > B.budget * 1.5 AND A.mem_GB > 1 ;""")
+                        GROUP BY  pool_name, transaction_id, result_type
+                        ) ATABLE
+                        INNER JOIN
+                        (SELECT transaction_id, max(statement_id)  statement_id, max(success::varchar) AS success
+                                FROM """+ str(args.dcschema)  +""".query_summary_hist
+                                WHERE date(start_timestamp) > current_date -1 - """+ str(args.days)+"""
+                                AND request_type NOT IN ('TRANSACTION') group by 1
+                        ) CTABLE USING (transaction_id)
+                        WHERE ATABLE.result_type <> 'Granted' -- MEMORY ERRORS
+
+                        UNION ALL
+
+                        SELECT 'Granted', A.*  FROM
+                        ( SELECT pool_name,
+                                 transaction_id,
+                                 max(date_trunc('second',start_time))::timestamp AS start,
+                                 (max(memory_kb/1024/1024))::numeric(14,2) AS mem_GB
+                           FROM """+ str(args.dcschema)  +""".resource_acquisitions
+                           WHERE  time >= current_date - """+ str(args.days)  +"""
+                           AND RESULT ='Granted'                -- MEMORY GRANTS > BUDGET by 50%.
+                           GROUP BY  pool_name, transaction_id
+                        ) A
+                        INNER JOIN (
+                                select pool_name, avg(query_budget_kb/1024/1024)::numeric(14,2) as budget from resource_pool_status group by 1
+                                ) B  using(pool_name)
+                        WHERE A.mem_gb > B.budget * 1.5 AND A.mem_GB > 1 ;"""
+   #print sql
+   cur.execute(sql)
 
    rows = cur.fetchall()
    points = []
@@ -67,12 +78,12 @@ def exec_memlarge2(message):
                 points.append(row)
    cur.close()
 
-   # get number of subplots based on distinct pool_name(s) 
+   # get number of subplots based on distinct pool_name(s)
    pools = list(set([item[1] for item in points]))
    no_subplots = len(pools)
 
    fig,ax = plt.subplots(no_subplots)
-   fig.suptitle("Memory Rejections (red) & workloads> 1.5 * pool_budget  (green) ", fontsize=12)
+   fig.suptitle("Memory Rejections (red) & workloads > 1.5 * pool_budget  (green) ", fontsize=12)
 
    fig.set_figheight( 3  * no_subplots)
    fig.set_figwidth (15)
@@ -80,7 +91,6 @@ def exec_memlarge2(message):
    i=0
    for pool in sorted(pools):
         l = [item for item in points if item[1] == pool]
-        print pool
         ax[i].grid(True)
         ax[i].set_title(pool,y=0.80)
         ax[i].set_ylabel('Mem(GB)')
@@ -97,9 +107,9 @@ def exec_memlarge2(message):
                         style='ro'
                 else:
                         style='yo'
-                l2 = [item for item in l if item[0] == stat]
-                l3 = [i1[3] for i1 in l2]
-                l4 = [i2[4] for i2 in l2]
+                l2 = [item for item in l if item[0] == stat] # build list for each stat (granted, retried, failed) 
+                l3 = [i1[3] for i1 in l2] # x axis, dates
+                l4 = [i2[4] for i2 in l2] # y axis, memory
                 ax[i].plot(l3,l4,style,label= stat,markersize=5)
                 ax[i].set_ylim(0,1.5 * max(l4))
                 ax[i].legend(loc=2,prop={'size':7})
@@ -110,8 +120,6 @@ def exec_memlarge2(message):
    msgImg.add_header('Content-ID', '<memlarge>')
    msgImg.add_header('Content-Disposition', 'inline', filename='MEMLARGE.png')
    msg.attach(msgImg)
-
-
 
 def exec_wait(msg):
    global args
@@ -542,75 +550,79 @@ def exec_label(message):
  msgImg.add_header('Content-Disposition', 'inline', filename='LABEL.png')
  msg.attach(msgImg)
 
-
 def exec_spilled(message):
  global args
- #we dont want to crowd the chart with all spills so choosing a threshold of 30 GB defined below
- threshold = 30 
+ threshold = '20'  #show spills > threshold GB only 
+
  cur = db.cursor()
  cur.execute("set session timezone ='America/New_York';")
  
  cur = db.cursor()
- cur.execute("""SELECT	S.event_type || '-' || A.pool_name,
-        	date_trunc('hour',S.time)::timestamp,
+ cur.execute("""SELECT A.pool_name,
+		       S.event_type,
+        	       date_trunc('hour',S.time)::timestamp,
         	count(distinct S.session_id || '' || S.transaction_id || '' ||S.statement_id) as spill_count,
         	max(A.mem_gb)::numeric(14,2) as max_mem_gb
-		FROM
-        		(select time, user_name, event_type,session_id,transaction_id,statement_id
-                	from dc_execution_engine_events where time >= current_date -""" + str(args.days) + """ 
-                	and event_type IN ('GROUP_BY_SPILLED', 'JOIN_SPILLED') ) S
-			INNER JOIN (select      transaction_id,
-                        			statement_id,
-                        			pool_name,
-                        		(max(memory_kb)/1024/1024)::numeric(14,2) as mem_gb
-                			FROM """+ args.dcschema + """.resource_acquisitions where time >= current_date -""" +str(args.days)+ """ group by 1,2,3) A
-					ON S.transaction_id = A.transaction_id AND S.statement_id = A.statement_id
-					WHERE A.mem_gb > """ + str(threshold) +"""  -- greater than 'threshold' GB
-					group by 1,2 order by 1,2 DESC;""")
+		FROM  (SELECT 	time, 
+				user_name, 
+				event_type,
+				session_id,
+				transaction_id,
+				statement_id
+                	FROM  dc_execution_engine_events
+			WHERE time >= current_date -""" + str(args.days) + """ 
+                	AND event_type IN ('GROUP_BY_SPILLED','JOIN_SPILLED') 
+			) S
+			INNER JOIN (SELECT transaction_id,
+                        		   statement_id,
+                        		   pool_name,
+                        		   (max(memory_kb)/1024/1024)::numeric(14,2) as mem_gb
+                			FROM """+ args.dcschema + """.resource_acquisitions
+					WHERE time >= current_date -""" + str(args.days)+ """ group by 1,2,3
+				   ) A
+			USING (transaction_id, statement_id) 	
+			WHERE A.mem_gb > """ + threshold +"""  -- greater than 'threshold' GB
+			GROUP BY 1,2,3 order by 1,2,3;""")
+
  if (cur.rowcount > 0 ):
   rows = cur.fetchall()
-  #make 2 subplots, 1 for query count and one for mem usage
-  fig,ax = plt.subplots(1)
-  ax_sec = ax.twinx()
+  points = []
+  for row in rows:
+                points.append(row)
+ cur.close()
+
+ # get number of subplots based on distinct pool_name(s)
+ pools = list(set([item[0] for item in points]))
+ no_subplots = len(pools)
  
-  prior_rp,sti  =  "",1
-  xdata,ydata1,ydata2 =  [],[],[]
-  for index,row in enumerate(rows):
-        #start
-        if prior_rp == "":
-                 prior_rp = row[0]
-        #during
-        if row[0] != prior_rp or index  == len(rows) - 1 : #report
-		    if index == len(rows) - 1 : #last row to append first before plotting
-			#keep the same plot and add a new data point
- 		       	xdata.append(row[1])
-		        ydata1.append(int(row[2])) # query count
-		        ydata2.append(int(row[3])) # mem usage
+ fig,ax = plt.subplots(no_subplots)
+ ax_sec = [a.twinx() for a in ax]
+ fig.suptitle("Join/GroupBy SPILL(>"+ threshold + " GB)  - Query count/Mem usage", fontsize=12)
 
-                    line, =ax.plot(xdata,ydata1,"-",label= prior_rp,linewidth=2)
-                    ax.set_title('Join/GroupBy SPILL(>'+ threshold + ' GB)  - Query count/Mem usage')
-                    ax.set_ylabel('Query Count')
-		    ax.legend(loc=2,prop={'size':7})
-
-                    ax_sec.plot(xdata,ydata2,":",label=prior_rp ,linewidth=2)
-                    ax_sec.set_ylabel('Mem(GB)')
-		    ax_sec.legend(loc=1,prop={'size':7})
-                    
-		    ax.set_xlabel('Date')
-                    ax.grid(True)
-
-                    # format the ticks
-                    ax.xaxis.set_major_locator(DayLocator())
-                    ax.xaxis.set_major_formatter(DateFormatter('%b %d'))
-                    ax.xaxis.set_minor_locator(HourLocator(np.arange(0, 25, 6)))
-
-                    xdata,ydata1,ydata2 = [],[],[]
-                    prior_rp = row[0]
-                    sti += 1
-        #keep the same plot and add a new data point
-        xdata.append(row[1])
-        ydata1.append(int(row[2])) # query count
-        ydata2.append(int(row[3])) # mem usage
+ fig.set_figheight( 3  * no_subplots)
+ fig.set_figwidth (15)
+ 
+ for i,pool in enumerate(sorted(pools)):
+        l = [item for item in points if item[0] == pool] #list of rows for a given pool 
+        ax[i].grid(True)
+        ax[i].set_title(pool,y=0.80)
+        ax[i].set_ylabel('Spilled Mem(GB)')
+        ax[i].xaxis.set_major_locator(HourLocator(np.arange(0, 25, 6)))
+        ax[i].xaxis.set_major_formatter(DateFormatter('%m/%d-%H'))
+        ax[i].xaxis.set_minor_locator(HourLocator(np.arange(0, 25, 6)))
+        ax[i].set_xlim([datetime.date.today() - datetime.timedelta(days=args.days, hours=1  ) ,  datetime.date.today() +  datetime.timedelta(hours=1) ])
+        plt.setp(ax[i].get_xticklabels(), rotation=35)
+        for event in list(set([item[1] for item in l])):
+                l2 = [item for item in l if item[1] == event] # build list for a given event ( GBYSPILLED or JOINSPILL really ) 
+                x  = [i1[2] for i1 in l2]
+                y1 = [i2[4] for i2 in l2]
+		y2 = [i3[3] for i3 in l2]
+                ax[i].plot(x,y1,'ro',label=event ,)
+                ax[i].legend(loc=2,prop={'size':7})
+                
+		ax_sec[i].plot(x,y2,"g*",label=event ,markersize=5)
+                ax_sec[i].set_ylabel('Spill count')
+                ax_sec[i].legend(loc=1,prop={'size':7})
 
  plt.savefig("SPILL")
  cur.close()
@@ -770,8 +782,8 @@ def exec_reswait(msg):
 		where result_type not in ('Granted') 
 		GROUP BY 1,2 order by 1,2 DESC;""")
    rows = cur.fetchall()
-   fig,ax = plt.subplots(1)
-   ax_sec = ax.twinx() 
+   fig,ax = plt.subplots()
+   ax_sec = ax.twinx()
 
    prior_rp = ""
    xdata,ydata1,ydata2 = [],[],[]
