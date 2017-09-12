@@ -229,7 +229,7 @@ def exec_label(message):
 
 def exec_spilled(message):
  global args
-
+ threshold = 30 # limit data points to spills > threshold
  cur = db.cursor()
  cur.execute("set session timezone ='America/New_York';")
  
@@ -248,16 +248,17 @@ def exec_spilled(message):
                         		(max(memory_kb)/1024/1024)::numeric(14,2) as mem_gb
                 			FROM """+ args.dcschema + """.resource_acquisitions where time >= current_date -""" +str(args.days)+ """ group by 1,2,3) A
 					ON S.transaction_id = A.transaction_id AND S.statement_id = A.statement_id
-					WHERE A.mem_gb > 50  -- greater than 50 GB 
+					WHERE A.mem_gb > """ + str(threshold) + """  -- greater than threshold  GB 
 					group by 1,2 order by 1,2 DESC;""")
- rows = cur.fetchall()
- #make 2 subplots, 1 for query count and one for mem usage
- fig,ax = plt.subplots(1)
- ax_sec = ax.twinx()
+ if (cur.rowcount > 0 ):
+  rows = cur.fetchall()
+  #make 2 subplots, 1 for query count and one for mem usage
+  fig,ax = plt.subplots(1)
+  ax_sec = ax.twinx()
  
- prior_rp,sti  =  "",1
- xdata,ydata1,ydata2 =  [],[],[]
- for index,row in enumerate(rows):
+  prior_rp,sti  =  "",1
+  xdata,ydata1,ydata2 =  [],[],[]
+  for index,row in enumerate(rows):
         #start
         if prior_rp == "":
                  prior_rp = row[0]
@@ -270,7 +271,7 @@ def exec_spilled(message):
 		        ydata2.append(int(row[3])) # mem usage
 
                     line, =ax.plot(xdata,ydata1,"-",label= prior_rp,linewidth=2)
-                    ax.set_title('Join/GroupBy SPILL - Query count/Mem usage')
+                    ax.set_title('Join/GroupBy SPILL ( " + threshold + " GB) - Query count/Mem usage')
                     ax.set_ylabel('Query Count')
 		    ax.legend(loc=2,prop={'size':7})
 
