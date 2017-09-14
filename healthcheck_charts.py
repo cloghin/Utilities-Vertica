@@ -584,10 +584,12 @@ def exec_spilled(message):
 			WHERE A.mem_gb > """ + threshold +"""  -- greater than 'threshold' GB
 			GROUP BY 1,2,3 order by 1,2,3;""")
 
- if (cur.rowcount > 0 ):
-  rows = cur.fetchall()
-  points = []
-  for row in rows:
+ if (cur.rowcount == 0 ):
+  return
+ 
+ rows = cur.fetchall()
+ points = []
+ for row in rows:
                 points.append(row)
  cur.close()
 
@@ -911,6 +913,94 @@ def exec_objlock (msg):
   msgImg.add_header('Content-Disposition', 'inline', filename='OBJLOCK.png')
   msg.attach(msgImg)
 
+
+def exec_bucket(msg):
+ global args
+ threshold = "501" 
+
+ cur = db.cursor()
+ cur.execute("set session timezone ='America/New_York';")
+ 
+ cur = db.cursor() 
+ cur.execute(""" SELECT  users.resource_pool, to_char(A.dt,'MMdd') || '-' || A.elapsed_bucket, sum(A.count) FROM
+	                       (SELECT
+	                       	 date(RI.time) AS dt,
+	                       	 RI.user_name ,
+	                       	  	CASE WHEN datediff('second',RI.time,RC.time)  < 2 THEN 'A<2s'
+	                       				  WHEN datediff('minute',RI.time,RC.time)  < 1 THEN 'B<1m'
+	                       				  WHEN datediff('minute',RI.time,RC.time)  < 2 THEN 'C<2m'
+	                       				  WHEN datediff('minute',RI.time,RC.time)  < 5 THEN 'D<5m'
+	                       				  WHEN datediff('minute',RI.time,RC.time)  < 10 THEN 'E<10m'
+	                       				 WHEN datediff('minute',RI.time,RC.time)  < 30 THEN 'F<30m'
+	                       		ELSE 'G>30m'
+	                       		END AS  elapsed_bucket, 
+	                       	   count(*) 
+	                       	   FROM """+ args.dcschema +""".requests_issued RI INNER JOIN """+args.dcschema+""".requests_completed RC USING(session_id,request_id) 
+	                       WHERE RC.success= TRUE  AND RI.request_type  NOT IN ('SET','UTILITY','TRANSACTION')
+	                       AND datediff('millisecond',RI.time,RC.time) > """ + threshold + """ 
+	                       AND  date(RI.time) >=  current_Date - """ + str(args.days) + """
+ 	                       GROUP BY 1 , 2 ,3 ) 
+			  	A INNER JOIN users USING (user_name)
+ 	                        GROUP BY 1,2 ORDER BY 1,2""")
+ if (cur.rowcount > 0 ):
+  	   rows = cur.fetchall()
+  	   points = []
+  	   for row in rows:
+                points.append(row)
+ cur.close()
+
+ # get number of subplots based on distinct pool_name(s)
+ pools = list(set([item[0] for item in points]))
+ no_subplots = len(pools)
+ 
+ fig,ax = plt.subplots(no_subplots)
+ ax_sec = [a.twinx() for a in ax]
+ fig.suptitle("Query elapsed time (> "+threshold +  " ms) by pool", fontsize=12)
+
+ fig.set_figheight( 6  * no_subplots)
+ fig.set_figwidth (15)
+
+ width = 0.35
+ 
+ for i,pool in enumerate(sorted(pools)):
+        l = [item for item in points if item[0] == pool] #list of rows for a given pool 
+        ax[i].grid(True)
+        ax[i].set_title(pool,y=0.80)
+        ax[i].set_ylabel('Query count')
+        #ax[i].xaxis.set_major_formatter(DateFormatter('%m/%d-%H'))
+        x  = [i1[1] for i1 in l]
+        y  = [i2[2] for i2 in l]
+	ind = np.arange(len(x))
+       	rects1 = ax[i].bar(ind + width, y, width)
+
+	for ii,elem in enumerate(x):
+		if elem.find("A<") > 0 :
+			rects1[ii].set_color('g')
+                if elem.find("B<") > 0 :
+                        rects1[ii].set_color('c')
+                if elem.find("C<") > 0 :
+                        rects1[ii].set_color('b')
+                if elem.find("D<") > 0 :
+                        rects1[ii].set_color('y')
+                if elem.find("E<") > 0 :
+                        rects1[ii].set_color('m')
+	        if elem.find("F<") > 0 :
+                        rects1[ii].set_color('r')
+                if elem.find("G>") > 0 :
+                        rects1[ii].set_color('k')
+	       
+	ax[i].set_xticks(ind + 0.5 * width)
+	ax[i].set_xticklabels(x, rotation=55 ) #rotation = 35
+
+ plt.savefig("BUCKET")
+ cur.close()
+
+ img = open('BUCKET.png', 'rb').read()
+ msgImg = MIMEImage(img, 'png')
+ msgImg.add_header('Content-ID', '<bucket>')
+ msgImg.add_header('Content-Disposition', 'inline', filename='BUCKET.png')
+ msg.attach(msgImg)
+
 def exec_license (msg):
 	global args
 	result = []
@@ -1220,7 +1310,7 @@ parser.add_argument('--email',
 parser.add_argument('--days', type=int,
                     help='number of days back from present to capture in the report')
 parser.add_argument('--type',
-                    help='report type to send MEM|MEMLARGE|LABEL|SPILL|GCL|OBJLOCK|RESWAIT|ALL|LICENSE|WAIT')
+                    help='report type to send MEM|MEMLARGE|LABEL|SPILL|GCL|OBJLOCK|RESWAIT|ALL|LICENSE|WAIT|BUCKET')
 parser.add_argument('--password',
                     help='vertica dbadmin\'s password')
 parser.add_argument('--host',
@@ -1274,6 +1364,7 @@ if args.type <> 'LICENSE' :
 		<img src="cid:reswait"><BR>
 		<img src="cid:wait"><BR>
 		<img src="cid:objlock"><BR>
+		<img src="cid:bucket"><BR>
         </p>"""
   # Record the MIME types.
   msgHtml = MIMEText(html, 'html')
@@ -1297,6 +1388,9 @@ if args.type in ['LICENSE']:
        ret = exec_license(msg)
 if args.type in ['WAIT','ALL']:
        exec_wait(msg)
+if args.type in ['BUCKET','ALL']:
+       exec_bucket(msg)
+
 
 db.close()
 
