@@ -91,7 +91,7 @@ def exec_memlarge(message):
 
    for i,pool in enumerate(sorted(pools)):
         l = [item for item in points if item[1] == pool]
-        budget = max([b[5] for b  in l if b[5] > 0 ])
+        budget = max([b[5] for b  in l if b[5] >= 0 ]) #establish budget to show as horizontal line below
         ax[i].axhline(budget ,color='r',linestyle='dotted')
         ax[i].grid(True)
         ax[i].set_title(pool + " / Budget:" + str(budget) +"(GB)",y=0.80,weight='bold')
@@ -134,7 +134,7 @@ def exec_wait(msg):
    SQL=""" select pool_name,
 	   max(date_trunc('second',time))::timestamp as date,
            max(datediff('second',start_time,time)) as wait_secs
-           FROM dc.resource_acquisitions
+           FROM """ + args.dcschema +""".resource_acquisitions
            WHERE  time >= current_date - """+ str(args.days)  +"""
            AND RESULT = 'Granted' 
            GROUP BY  pool_name, transaction_id, statement_id
@@ -196,7 +196,7 @@ def exec_memusage(message):
    
    #get maxconcurrency to plot in graphs
    cur=db.cursor()
-   cur.execute("""select * from 
+   sql = """select * from 
 		(select pool_name, 
 		(declared_size_memory_kb_start_value/1024/1024)::integer as memsize,  
 	        (limit_memory_kb_start_value/1024/1024)::integer as maxmemsize , 
@@ -205,7 +205,10 @@ def exec_memusage(message):
 		row_number() over(partition by pool_name order by time DESC ) RN
  		FROM dc_resource_pool_status_by_""" + args.grain + """ 
 	 	where pool_name NOT IN """ + pool_name_not_in + """ and time > current_date - """ + str(args.days) + """ ) x
- 		where x.rn = 1 order by 1 ASC;""")
+ 		where x.rn = 1 order by 1 ASC;"""
+   if args.debug:
+	print sql
+   cur.execute(sql)
    rows = cur.fetchall()
 
    dict ={}
@@ -1217,7 +1220,7 @@ if args.type <> 'LICENSE' :
 
 if args.type in ['MEM_LARGE','ALL']:
        exec_memlarge(msg)
-if args.type in ['ARY','ALL']: # resource pool usage over time ( # queries, reserved_memory)
+if args.type in ['MEM_SUMMARY','ALL']: # resource pool usage over time ( # queries, reserved_memory)
        exec_memusage(msg)
 #if args.type in ['LABEL','ALL']: #labeled queries execution time + memory , last 7 days
 #       exec_label(msg)
