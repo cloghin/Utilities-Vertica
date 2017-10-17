@@ -1218,7 +1218,7 @@ if args.type <> 'LICENSE' :
   msgHtml = MIMEText(html, 'html')
   msg.attach(msgHtml)
 
-print "Startig execution at " + datetime.datetime.now()
+print "Starting execution at " + str(datetime.datetime.now())
 
 if args.type in ['MEM_LARGE','ALL']:
        exec_memlarge(msg)
