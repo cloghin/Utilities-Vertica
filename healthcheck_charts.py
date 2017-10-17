@@ -202,6 +202,7 @@ def exec_memusage(message):
 	        (limit_memory_kb_start_value/1024/1024)::integer as maxmemsize , 
 		planned_concurrency_start_value,
 		limit_queries_start_value ,
+		priority_end_value,
 		row_number() over(partition by pool_name order by time DESC ) RN
  		FROM dc_resource_pool_status_by_""" + args.grain + """ 
 	 	where pool_name NOT IN """ + pool_name_not_in + """ and time > current_date - """ + str(args.days) + """ ) x
@@ -213,7 +214,7 @@ def exec_memusage(message):
 
    dict ={}
    for row in rows:
-      dict[str(row[0])] = str(row[1]) + "G/" + str(row[2]) + "G/" + str(row[3]) + "/" + str(row[4])
+      dict[str(row[0])] = str(row[1]) + "G/" + str(row[2]) + "G/" + str(row[3]) + "/" + str(row[4]) + "/" + str(row[5])
    cur.close()
    no_subplots = len(rows)   #cannot add subplots dynamically, so we need to count them ahead of time 
 
@@ -243,7 +244,7 @@ def exec_memusage(message):
 
    fig,ax = plt.subplots(figsize=(15,2.5 * no_subplots),nrows=no_subplots) # no risk of having 1 subplot since at least general + sysdata + sysquery exist
    ax_sec = [a.twinx() for a in ax]
-   fig.suptitle(args.grain.title() + " grain: Used Memory/Concurrency(EDT) by pool - " + args.host +"\n Excluded pools:" + pool_name_not_in , weight='bold',size = 15, color='b' )
+   fig.suptitle(args.grain.title() + " grain: Memory Summary/Conc.- (in EDT) by pool - " + args.host +"\n Excluded pools:" + pool_name_not_in + "\npool name - mem/maxmem/plannedconcurrency/maxconcurrency/priority", weight='bold',size = 15, color='b' )
 
    prior_rp = ""
    xdata,ydata1,ydata2,ydata3 = [],[],[],[]
