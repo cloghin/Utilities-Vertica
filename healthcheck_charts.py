@@ -87,7 +87,7 @@ def exec_memlarge(message):
    if no_subplots == 1: 
 	no_subplots = 2 #add 1 subplot to workaorund the array type change when  plotting 1 subplot
    fig,ax = plt.subplots(figsize=(15,2.5 * no_subplots),nrows=no_subplots)
-   fig.suptitle("High Memory Queries (Granted,Failed&Retried,Failed\nUsed mem > "+budget_factor + " * budget and mem(GB) > " + min_mem, weight='bold',color='b',size=15)
+   fig.suptitle("High Memory Queries (Granted,Failed&Retried,Failed)(EDT)\nUsed mem > "+budget_factor + " * budget and mem(GB) > " + min_mem, weight='bold',color='b',size=15)
 
    for i,pool in enumerate(sorted(pools)):
         l = [item for item in points if item[1] == pool]
@@ -157,7 +157,7 @@ def exec_wait(msg):
 
   
    fig,ax = plt.subplots(figsize=(15,2.5 * no_subplots),nrows=no_subplots)
-   fig.suptitle("Wait times > " + wait_secs + "(sec)" , weight='bold',size = 15, color='b' )
+   fig.suptitle("Wait times > " + wait_secs + "(sec)(EDT)" , weight='bold',size = 15, color='b' )
 
    for i,pool  in enumerate(sorted(pools)):
 	print i,pool
@@ -243,7 +243,7 @@ def exec_memusage(message):
 
    fig,ax = plt.subplots(figsize=(15,2.5 * no_subplots),nrows=no_subplots) # no risk of having 1 subplot since at least general + sysdata + sysquery exist
    ax_sec = [a.twinx() for a in ax]
-   fig.suptitle(args.grain.title() + " grain: Used Memory/Concurrency  by pool - " + args.host +"\n Excluded pools:" + pool_name_not_in , weight='bold',size = 15, color='b' )
+   fig.suptitle(args.grain.title() + " grain: Used Memory/Concurrency(EDT) by pool - " + args.host +"\n Excluded pools:" + pool_name_not_in , weight='bold',size = 15, color='b' )
 
    prior_rp = ""
    xdata,ydata1,ydata2,ydata3 = [],[],[],[]
@@ -444,7 +444,7 @@ def exec_spilled(message):
  if (no_subplots == 1 ):
 	no_subplots=2
  fig,ax = plt.subplots(figsize=(15,2.5 * no_subplots),nrows=no_subplots)
- fig.suptitle("Join/GroupBy SPILL(>"+ threshold + " GB)  - Query count/Mem usage", weight='bold', size=15, color='b')
+ fig.suptitle("Join/GroupBy SPILL(>"+ threshold + " GB)  - Query count/Mem usage(EDT)", weight='bold', size=15, color='b')
 
  for i,pool in enumerate(sorted(pools)):
         l = [item for item in points if item[0] == pool] #list of rows for a given pool 
@@ -632,7 +632,7 @@ def exec_mem_rejects(msg):
         no_subplots = 2 #add 1 subplot to workaorund the array type change when  plotting 1 subplot
    fig,ax = plt.subplots(figsize=(15,2.5 * no_subplots),nrows=no_subplots)
    ax_sec  = [a.twinx() for a in ax]
-   fig.suptitle("Memory Rejects(GB)(pool-Mem/MaxMem/PlndConc/MaxConc)", fontsize=15, color='b',weight='bold')
+   fig.suptitle("Memory Rejects(GB)(pool-Mem/MaxMem/PlndConc/MaxConc)(EDT)", fontsize=15, color='b',weight='bold')
 
    for i,pool in enumerate(sorted(pools)):
         ax[i].grid(True)
@@ -1217,6 +1217,8 @@ if args.type <> 'LICENSE' :
   # Record the MIME types.
   msgHtml = MIMEText(html, 'html')
   msg.attach(msgHtml)
+
+print "Startig execution at " + datetime.datetime.now()
 
 if args.type in ['MEM_LARGE','ALL']:
        exec_memlarge(msg)
