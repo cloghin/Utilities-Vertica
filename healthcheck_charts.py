@@ -843,11 +843,10 @@ def exec_license (msg):
 	rows = cur.fetchall()
 	cur.close()
 	for row in rows:
-		# UNCOMMENT the audit execution !!!!!
 		print row
-		#cur = db.cursor()
-		#cur.execute(row[0])
-		#cur.close()
+		cur = db.cursor()
+		cur.execute(row[0])
+		cur.close()
 
 	#studio breakdown CHART 1  - tripeaks license allocation
 	cur = db.cursor()
@@ -971,7 +970,7 @@ def exec_license (msg):
 				NATURAL JOIN (	select A.date as dt , A.gb * B.pct as tripeaks_events_gb from (select date(audit_end_timestamp), avg( size_bytes/1024/1024/1204) as gb 
 				from user_audits where object_schema='gsnmobile' and object_name ='events' group by 1) A 
 				CROSS JOIN 
-			( select  (select count(*) from gsnmobile.events where app_name = 'TriPeaks Solitaire')/(select count(*)  from gsnmobile.events) as pct from dual ) B ) C order by 1;"""
+			( select  (select count(*) from gsnmobile.events where app_name = 'TriPeaks Solitaire')/(select count(*)  from gsnmobile.events) as pct from dual ) B ) C order by 1,2 ;"""
 	if args.debug:
 		print sql
 	cur.execute(sql)
