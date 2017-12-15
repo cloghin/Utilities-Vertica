@@ -5,6 +5,7 @@ import matplotlib
 matplotlib.use('Agg')
 import matplotlib.pyplot as plt
 from matplotlib.dates import DayLocator, HourLocator, DateFormatter,MonthLocator
+import matplotlib.dates as mdates
 from cycler import cycler
 import datetime
 import numpy as np
@@ -770,7 +771,7 @@ def exec_bucket(msg):
 	                       		END AS  elapsed_bucket, 
 	                       	   count(*) 
 	                       	   FROM """+ args.dcschema +""".requests_issued RI INNER JOIN """+args.dcschema+""".requests_completed RC USING(session_id,request_id) 
-	                       WHERE RC.success= TRUE  AND RI.request_type  NOT IN ('SET','UTILITY','TRANSACTION')
+	                       WHERE RC.success IN (TRUE,FALSE)   AND RI.request_type  NOT IN ('SET','UTILITY','TRANSACTION')
 	                       AND datediff('millisecond',RI.time,RC.time) > """ + threshold + """ 
 	                       AND  date(RI.time) >=  current_Date - """ + str(args.days) + """
  	                       GROUP BY 1 , 2 ,3 ) 
@@ -842,11 +843,10 @@ def exec_license (msg):
 	rows = cur.fetchall()
 	cur.close()
 	for row in rows:
-		# UNCOMMENT the audit execution !!!!!
 		print row
-		#cur = db.cursor()
-		#cur.execute(row[0])
-		#cur.close()
+		cur = db.cursor()
+		cur.execute(row[0])
+		cur.close()
 
 	#studio breakdown CHART 1  - tripeaks license allocation
 	cur = db.cursor()
@@ -970,7 +970,7 @@ def exec_license (msg):
 				NATURAL JOIN (	select A.date as dt , A.gb * B.pct as tripeaks_events_gb from (select date(audit_end_timestamp), avg( size_bytes/1024/1024/1204) as gb 
 				from user_audits where object_schema='gsnmobile' and object_name ='events' group by 1) A 
 				CROSS JOIN 
-			( select  (select count(*) from gsnmobile.events where app_name = 'TriPeaks Solitaire')/(select count(*)  from gsnmobile.events) as pct from dual ) B ) C order by 1;"""
+			( select  (select count(*) from gsnmobile.events where app_name = 'TriPeaks Solitaire')/(select count(*)  from gsnmobile.events) as pct from dual ) B ) C order by 1,2 ;"""
 	if args.debug:
 		print sql
 	cur.execute(sql)
@@ -1130,6 +1130,120 @@ def autolabel(ax, rects):
 		yloc = rect.get_y() + rect.get_height()/2.0
         	ax.text( xloc + 10  , yloc, '%s' % '{0:.2f}'.format(xloc)  , ha='left',va='center')
 
+def exec_trendlicense(msg):
+  daysahead = 180 
+  cur = db.cursor() 
+  sql = """SELECT date(audit_start_timestamp), 
+		 (database_size_bytes/1024/1024/1024/1024)::numeric(16,6) as db_GB, 
+		 (license_size_bytes/1024/1024/1024/1024)::numeric(16,6) as license_GB  
+		 FROM license_audits where audited_data ='Total' and date(audit_start_timestamp) >= '2017-11-09'
+		 order by audit_start_timestamp ASC;"""
+ 
+  if args.debug:
+      print sql
+  cur.execute(sql)
+
+  rows = cur.fetchall()
+  cur.close()
+  x   = [i[0] for i in rows]
+  y_d = [i[1] for i in rows]
+  license = max([i[2] for i in rows])
+  
+  no_subplots = 3 
+  fig,ax = plt.subplots(figsize=(12, 3.5 * no_subplots), nrows=no_subplots)
+  ax[0].set_xlim([min(x) , max(x) +  datetime.timedelta(days=daysahead)])
+  ax[0].grid(True)
+  
+  ax[0].plot(x,y_d,"o",label="Database size",markersize=3)
+  ax[0].axhline(license,color='g', label="License size",linewidth=3)
+
+  ax[0].legend(loc=2)
+  ax[0].set_title("Overall License usage(TiB)", weight='bold', y=0.90)
+  
+  xn = mdates.date2num(x) #transform dates to integers for polyfit
+  pfit = np.polyfit(xn, y_d, 1) # print "y=%.6fx+(%.6f)"%(z[0],z[1]) # 1 for linear ,2 for quadratic 
+
+  #build list of dates including the daysahead lookahead for forecast of regression function
+  date_list = [min(x) + datetime.timedelta(days=i) for i in range(0, daysahead + len(x))]
+  xn2 = mdates.date2num( date_list ) #convert to integers 
+  ax[0].plot(date_list ,np.polyval(pfit,xn2),"r--",label="Trendline DB size(TiB)")
+
+  #now plot the Top 25 tables 
+  cur = db.cursor()
+  sql = """ SELECT A.object_schema ||'.'||A.object_name , 
+		date(audit_start_timestamp),
+		(size_bytes/1024/1024/1024/1024)::numeric(16,6) as TiB,
+		rn
+		FROM user_audits A INNER JOIN  
+		--get TOP 25 tables by size to analyze 
+		(SELECT object_schema, object_name,
+		   row_number() over( ORDER BY max(size_bytes) DESC) AS rn 
+		   FROM user_audits WHERE object_type = 'TABLE' 
+		   AND  object_name IS NOT NULL
+		   GROUP BY 1,2 ORDER BY max(size_bytes) DESC  LIMIT 25) TOP25
+		USING (object_schema,object_name)"""
+  if args.debug:
+	print sql
+  cur.execute(sql)
+  rows = cur.fetchall()
+  cur.close()
+
+  order = list(set([i[3] for i in rows]))
+
+  x = set([i[1] for i in rows])
+  future_dates =  [datetime.date.today() +  datetime.timedelta(weeks=i) for i in range(0,56,4)]
+  complete_dates = future_dates + list(x)  #future_dates.extend(x) 
+
+  #build list of dates including the daysahead lookahead for forecast of regression function
+  xn2 = mdates.date2num( complete_dates ) #convert to integers 
+
+  ax[1].set_xlim([min(x) , max(x) +  datetime.timedelta(weeks=56)])
+  ax[1].grid(True)
+  ax[2].grid(True)
+
+  ax[1].axhline(license,color='g', label="License size",linewidth=3)
+  #ax[2].axhline(license,color='g', label="License size",linewidth=3)
+
+  ax[1].set_title("Top 10 tables growth trend (TiB)", weight='bold',y=0.90)
+  ax[2].set_title("Top 11-25 tables growth trend (TiB)", weight='bold', y=0.90)
+
+    
+  for o in order[:10]:
+    t = set([i[0] for i in rows if i[3] == o]).pop()
+    print t 
+    points = [i for i in rows if i[0] == t]
+    x1 = [i[1] for i in points]
+    y1 = [i[2] for i in points]
+    line, = ax[1].plot(x1,y1,"o", markersize=3)
+
+    xn1 = mdates.date2num(x1) #transform dates to integers for polyfit
+    pfit = np.polyfit(xn1, y1, 1) # print "y=%.6fx+(%.6f)"%(z[0],z[1]) # 1 for linear ,2 for quadratic 
+    ax[1].plot(complete_dates, np.polyval(pfit,xn2),"--", color=line.get_color(), label=t)
+
+  for o in order[10:]:
+    t = set([i[0] for i in rows if i[3] == o]).pop()
+    print t 
+    points = [i for i in rows if i[0] == t]
+    x1 = [i[1] for i in points]
+    y1 = [i[2] for i in points]
+    line, = ax[2].plot(x1,y1,"o", markersize=3)
+
+    xn1 = mdates.date2num(x1) #transform dates to integers for polyfit
+    pfit = np.polyfit(xn1, y1, 1) # print "y=%.6fx+(%.6f)"%(z[0],z[1]) # 1 for linear ,2 for quadratic 
+    ax[2].plot(complete_dates, np.polyval(pfit,xn2),"--", color=line.get_color(), label=t)
+ 
+  ax[1].legend(loc=2, prop={'size': 7})
+  ax[2].legend(loc=2, prop={'size': 7})
+
+  plt.tight_layout(rect=[0, 0, 1, 0.95])
+  plt.savefig("TREND_LICENSE")
+  
+  img = open('TREND_LICENSE.png', 'rb').read()
+  msgImg = MIMEImage(img, 'png')
+  msgImg.add_header('Content-ID', '<memlarge>')
+  msgImg.add_header('Content-Disposition', 'inline', filename='TREND_LICENSE.png')
+  msg.attach(msgImg)
+
 def getstyle(s):
  if s <=15:
     style = "-"
@@ -1159,6 +1273,7 @@ parser.add_argument('--type',
 				OBJLOCK     => based on dc_lock_attempts shows lock history of a given object
 				LABEL       => based on given LABEL shows ....
 				LICENSE     => based on license_audits & user_audits shows various license usage charts 
+ 				TREND	    => based on license_audits + user audits show DB / Top 25 tables trends
 				ALL         => include all of the above charts """)
 parser.add_argument('--password',
                     help='vertica dbadmin\'s password')
@@ -1241,7 +1356,8 @@ if args.type in ['MEM_WAITS','ALL']:
        exec_wait(msg)
 if args.type in ['TIME_HIST','ALL']:
        exec_bucket(msg)
-
+if args.type in ['TREND']:
+       exec_trendlicense(msg)
 
 db.close()
 
