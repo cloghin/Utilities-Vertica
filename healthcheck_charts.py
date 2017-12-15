@@ -1105,18 +1105,22 @@ def exec_license (msg):
         (html,err) = p.communicate()
         result.append(html)
 
+	#get the trend data executed
+	exec_trend()
+
 	html = """<img src="cid:STUDIO"><BR> """ + result[0] + """
                   <img src="cid:PIE_STUDIO"><BR>
 		  <img src="cid:STUDIO_HISTORY"><BR> """ + result[1] + """
                   <img src="cid:SCHEMA"><BR> """ + result[2] + """
-                  <img src="cid:LICENSE"><BR>""" + result[3]
+                  <img src="cid:LICENSE"><BR>""" + result[3] + """
+                  <img src="cid:TREND"><BR>"""
 
 	# Record the MIME types.
 	msgHtml = MIMEText(html, 'html')
 	msg.attach(msgHtml)
 	msg['Subject'] = "DB License Monthly Charts(EST TZ)- " + str(args.host)+ "-" + str(args.type) 
 
-	for i in ['STUDIO','STUDIO_HISTORY','SCHEMA','PIE_STUDIO','LICENSE']:
+	for i in ['STUDIO','STUDIO_HISTORY','SCHEMA','PIE_STUDIO','LICENSE','TREND']:
 		img = open(i + '.png', 'rb').read()
   		msgImg = MIMEImage(img, 'png')
   		msgImg.add_header('Content-ID', '<'+i+'>')
@@ -1130,7 +1134,8 @@ def autolabel(ax, rects):
 		yloc = rect.get_y() + rect.get_height()/2.0
         	ax.text( xloc + 10  , yloc, '%s' % '{0:.2f}'.format(xloc)  , ha='left',va='center')
 
-def exec_trendlicense(msg):
+#3 charts for license usage 
+def exec_trend():
   daysahead = 180 
   cur = db.cursor() 
   sql = """SELECT date(audit_start_timestamp), 
@@ -1141,10 +1146,11 @@ def exec_trendlicense(msg):
  
   if args.debug:
       print sql
-  cur.execute(sql)
 
+  cur.execute(sql)
   rows = cur.fetchall()
   cur.close()
+
   x   = [i[0] for i in rows]
   y_d = [i[1] for i in rows]
   license = max([i[2] for i in rows])
@@ -1206,11 +1212,9 @@ def exec_trendlicense(msg):
 
   ax[1].set_title("Top 10 tables growth trend (TiB)", weight='bold',y=0.90)
   ax[2].set_title("Top 11-25 tables growth trend (TiB)", weight='bold', y=0.90)
-
     
   for o in order[:10]:
     t = set([i[0] for i in rows if i[3] == o]).pop()
-    print t 
     points = [i for i in rows if i[0] == t]
     x1 = [i[1] for i in points]
     y1 = [i[2] for i in points]
@@ -1222,7 +1226,6 @@ def exec_trendlicense(msg):
 
   for o in order[10:]:
     t = set([i[0] for i in rows if i[3] == o]).pop()
-    print t 
     points = [i for i in rows if i[0] == t]
     x1 = [i[1] for i in points]
     y1 = [i[2] for i in points]
@@ -1236,13 +1239,13 @@ def exec_trendlicense(msg):
   ax[2].legend(loc=2, prop={'size': 7})
 
   plt.tight_layout(rect=[0, 0, 1, 0.95])
-  plt.savefig("TREND_LICENSE")
+  plt.savefig("TREND")
   
-  img = open('TREND_LICENSE.png', 'rb').read()
-  msgImg = MIMEImage(img, 'png')
-  msgImg.add_header('Content-ID', '<memlarge>')
-  msgImg.add_header('Content-Disposition', 'inline', filename='TREND_LICENSE.png')
-  msg.attach(msgImg)
+  #img = open('TREND.png', 'rb').read()
+  #msgImg = MIMEImage(img, 'png')
+  #msgImg.add_header('Content-ID', '<trendlicense>')
+  #msgImg.add_header('Content-Disposition', 'inline', filename='TREND_LICENSE.png')
+  #msg.attach(msgImg)
 
 def getstyle(s):
  if s <=15:
@@ -1357,7 +1360,7 @@ if args.type in ['MEM_WAITS','ALL']:
 if args.type in ['TIME_HIST','ALL']:
        exec_bucket(msg)
 if args.type in ['TREND']:
-       exec_trendlicense(msg)
+       exec_trend()
 
 db.close()
 
