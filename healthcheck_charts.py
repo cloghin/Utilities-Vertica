@@ -1402,6 +1402,7 @@ msg['To'] = you
 if args.type <> 'LICENSE':
     html = """\
 		<p>
+		<img src="cid:canary"><BR>
 		<img src="cid:mem"><BR>
 				<img src="cid:gcl"><BR>
 				<img src="cid:spill"><BR>
@@ -1439,7 +1440,7 @@ if args.type in ['TIME_HIST', 'ALL']:
     exec_bucket(msg)
 if args.type in ['TREND']:
     exec_trend()
-if args.type in ['CANARY']:
+if args.type in ['CANARY','ALL']:
     exec_canary()
 
 db.close()
