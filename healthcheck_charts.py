@@ -708,9 +708,9 @@ def exec_objlock(msg):
                 ydata1.append(int(row[2]))  # lock count
                 ydata2.append(int(row[3]))  # max wait
 
-            line, = ax.plot(xdata, ydata1, "-", label=mode + " - lock count")
-            ax.set_title(args.tbname + " - lock counts / waits")
-            ax.set_ylabel('Lock count')
+        line, = ax.plot(xdata, ydata1, "-", label=mode + " - lock count")
+        ax.set_title(args.tbname + " - lock counts / waits")
+        ax.set_ylabel('Lock count')
         ax.legend(loc=2, prop={'size': 7})
 
         ax_sec.plot(xdata, ydata2, ":", color=line.get_color(), label=mode + " - lock wait")
