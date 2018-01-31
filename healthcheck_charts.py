@@ -484,7 +484,7 @@ def exec_gcl(message):
     cur = db.cursor()
     cur.execute("set session timezone ='America/New_York';")
     cur = db.cursor()
-    cur.execute("""select 	X.hour, 
+    sql = """select 	X.hour, 
 		X.wait_count,
 		X.max_wait_sec, 
 		Y.max_hold_sec,
@@ -509,32 +509,36 @@ def exec_gcl(message):
 			where object_name  IN ('Global Catalog') 
 			and time >= (current_date - """ + str(args.days) + """)
 			and regexp_like(node_name,'node0001$')
-			group by 1) Y using (hour) order by x.hour ASC;""")
+			group by 1) Y using (hour) order by x.hour ASC;"""
+    if args.debug:
+        print sql
+    cur.execute(sql)
     rows = cur.fetchall()
-    # make 2 subplots, * for max wait / max hold and wait lock count
-    #		   * fro avg wait / avg hold and lock count
+
+    points = []
+    for row in rows:
+        points.append(row)
+    cur.close()
+
+    # make 2 subplots, * for max wait / max hold and wait lock count  for avg wait / avg hold and lock count
     fig, ax = plt.subplots(2)
     ax_sec = [a.twinx() for a in ax]
 
-    xdata, ydata1, ydata2, ydata3, ydata4, ydata5, ydata6 = [], [], [], [], [], [], []
+    xdata = [i0[0] for i0 in points] #time
+    #subplot 1
+    ydata1 = [i1[1] for i1 in points] #wait count
+    ydata2 = [i2[2] for i2 in points] #max wait sec
+    ydata3 = [i3[3] for i3 in points] #max hold secs
 
-    for index, row in enumerate(rows):
-        # during
-        if index == len(rows) - 1:  # report
-            # keep the same plot and add a new data point
-            # subplot - 1
-            xdata.append(row[0])  # time
-            ydata1.append(row[1])  # Wait count
-            ydata2.append(row[2])  # Max wait sec
-            ydata3.append(row[3])  # Max hold sec
-            # subplot - 2
-            ydata4.append(row[4])  # lock count
-            ydata5.append(row[5])  # avg wait
-        ydata6.append(row[6])  # avg hold
+    ##subplot 2
+    ydata4 = [i4[4] for i4 in points] #lock count
+    ydata5 = [i5[5] for i5 in points] #avg wait
+    ydata6 = [i6[6] for i6 in points] #avg hold
 
-        # plot 1
-        ax[0].plot(xdata, ydata2, "-", label="wait max")
-        ax[0].plot(xdata, ydata3, "-", label="hold max")
+
+    # plot 1
+    ax[0].plot(xdata, ydata2, "-", label="wait max")
+    ax[0].plot(xdata, ydata3, "-", label="hold max")
 
     ax[0].set_title('GCL Maximum Wait&Hold time / Wait lock count', y=0.80, weight='bold')
     ax[0].set_ylabel('Wait&Hold GCL(sec)')
@@ -543,8 +547,6 @@ def exec_gcl(message):
     ax_sec[0].set_ylabel('Wait lock count')
 
     ax[1].plot(xdata, ydata5, "-", label="wait avg")
-
-
     ax[1].plot(xdata, ydata6, "-", label="hold avg")
     ax[1].set_title('GCL Average Wait&Hold Time / Lock count', y=0.80, weight='bold')
     ax[1].set_ylabel('Wait&Hold GCL(sec)')
@@ -557,29 +559,14 @@ def exec_gcl(message):
         ax[i].legend(loc=2)
         ax[i].set_xlabel('Date')
         ax[i].grid(True)
-        # ax[i].set_yscale("log", nonposx='clip')
 
         # format the ticks
         ax[i].xaxis.set_major_locator(DayLocator())
         ax[i].xaxis.set_major_formatter(DateFormatter('%b %d(%a)'))
         ax[i].xaxis.set_minor_locator(HourLocator(np.arange(0, 25, 6)))
 
-    xdata, ydata1, ydata2, ydata3, ydata4, ydata5, ydata6 = [], [], [], [], [], [], []
-
-    # keep the same plot and add a new data point
-    # subplot - 1
-    xdata.append(row[0])  # time
-    ydata1.append(row[1])  # Wait count
-    ydata2.append(row[2])  # Max wait sec
-    ydata3.append(row[3])  # Max hold sec
-    # subplot - 2
-    ydata4.append(row[4])  # lock count
-    ydata5.append(row[5])  # avg wait
-    ydata6.append(row[6])  # avg hold
-
     plt.tight_layout()
     plt.savefig("GCL")
-    cur.close()
 
     img = open('GCL.png', 'rb').read()
     msgImg = MIMEImage(img, 'png')
