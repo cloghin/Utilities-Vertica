@@ -250,6 +250,12 @@ def exec_memusage(message):
     cur.execute(sql)
     rows = cur.fetchall()
 
+    points = []
+    for row in rows:
+        points.append(row)
+    cur.close()
+
+
     fig, ax = plt.subplots(figsize=(15, 2.5 * no_subplots),
                            nrows=no_subplots)  # no risk of having 1 subplot since at least general + sysdata + sysquery exist
     ax_sec = [a.twinx() for a in ax]
@@ -257,25 +263,18 @@ def exec_memusage(message):
         args.grain.title() + " grain: Memory Summary/Conc.- (in EDT) by pool - " + args.host + "\n Excluded pools:" + pool_name_not_in + "\npool name - mem/maxmem/plannedconcurrency/maxconcurrency/priority",
         weight='bold', size=15, color='b')
 
-    prior_rp = ""
     xdata, ydata1, ydata2, ydata3 = [], [], [], []
 
-    for index, row in enumerate(rows):
-        # start
-        if prior_rp == "":
-            prior_rp = row[0]
-            i = 0
-        # during
-        if row[0] != prior_rp or index == len(rows) - 1:  # report based on completion or on last record
-            if index == len(rows) - 1:  # last row to append first before plotting
-                # keep the same plot and add a new data point
-                xdata.append(row[1])  # hour
-                ydata1.append(int(row[2]))  # reserved
-                ydata2.append(int(row[3]))  # borrowed memory
-        ydata3.append(int(row[4]))  # concurrency
+    pools = list(set([item[0] for item in points]))
+    for i, pool in enumerate(sorted(pools)):
+        l = [item for item in points if item[0] == pool]
+        xdata =  [i1[1] for i1 in l]  # x axis, hour
+        ydata1 = [i2[2] for i2 in l]  # y axis, reserved
+        ydata2 = [i3[3] for i3 in l]  # y axis, borrowed memory
+        ydata3 = [i4[4] for i4 in l]  # y axis, concurrency
 
         ax[i].stackplot(xdata, ydata1, ydata2, labels=('Reserved mem', 'Borrowed mem'))
-        ax[i].set_title(prior_rp + " - " + dict.get(prior_rp, "Missing pool"), weight='bold', y=0.80)
+        ax[i].set_title(pool + " - " + dict.get(pool, "Missing pool"), weight='bold', y=0.80)
         ax[i].set_ylabel('Mem(GB)')
 
         ax_sec[i].plot(xdata, ydata3, "-", label="Conc.", linewidth=1, color='g')
@@ -295,21 +294,10 @@ def exec_memusage(message):
 
 
     ax[i].xaxis.set_minor_locator(HourLocator(np.arange(0, 25, 6)))
-    xdata, ydata1, ydata2, ydata3 = [], [], [], []
-    prior_rp = row[0]  # reset rp name
-    if i < no_subplots - 1:
-        i += 1
-
-    # keep the same plot and add a new data point
-    xdata.append(row[1])  # hour
-    ydata1.append(int(row[2]))  # reserved
-    ydata2.append(int(row[3]))  # borrowed memory
-    ydata3.append(int(row[4]))  # concurrency
-
     ax[i].legend(loc=2)
+
     plt.tight_layout(rect=[0, 0, 1, 0.97])
     plt.savefig("MEM_SUMMARY")
-    cur.close()
 
     img = open('MEM_SUMMARY.png', 'rb').read()
     msgImg = MIMEImage(img, 'png')
