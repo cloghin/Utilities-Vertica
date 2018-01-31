@@ -169,18 +169,18 @@ def exec_wait(msg):
         l = [item for item in points if item[0] == pool]
         l1 = [i1[1] for i1 in l]  # x axis, dates
         l2 = [i2[2] for i2 in l]  # y axis, wait_secs
-    # ax[i].plot(l1,l2,"r")
-    ax[i].bar(l1, l2, 0.05, color='r')
-    ax[i].grid(True)
-    ax[i].set_ylabel('Wait time(sec)')
-    ax[i].set_title(pool, y=0.8, weight='bold')
+        # ax[i].plot(l1,l2,"r")
+        ax[i].bar(l1, l2, 0.05, color='r')
+        ax[i].grid(True)
+        ax[i].set_ylabel('Wait time(sec)')
+        ax[i].set_title(pool, y=0.8, weight='bold')
 
-    # format the ticks
-    ax[i].xaxis.set_major_locator(DayLocator())
-    ax[i].xaxis.set_major_formatter(DateFormatter('%b %d(%a)'))
-    ax[i].set_xlim([datetime.date.today() - datetime.timedelta(days=args.days + 1),
-                    datetime.date.today() + datetime.timedelta(days=1)])
-    ax[i].xaxis.set_minor_locator(HourLocator(np.arange(0, 25, 6)))
+        # format the ticks
+        ax[i].xaxis.set_major_locator(DayLocator())
+        ax[i].xaxis.set_major_formatter(DateFormatter('%b %d(%a)'))
+        ax[i].set_xlim([datetime.date.today() - datetime.timedelta(days=args.days + 1),
+                        datetime.date.today() + datetime.timedelta(days=1)])
+        ax[i].xaxis.set_minor_locator(HourLocator(np.arange(0, 25, 6)))
 
 
     plt.tight_layout(rect=[0, 0, 1, 0.97])
@@ -457,14 +457,14 @@ def exec_spilled(message):
         ax[i].xaxis.set_major_locator(DayLocator())
         ax[i].xaxis.set_major_formatter(DateFormatter('%b %d(%a)'))
         ax[i].xaxis.set_minor_locator(HourLocator(np.arange(0, 25, 6)))
-    dt = [item[2] for item in l]
-    ax[i].set_xlim([min(dt) - datetime.timedelta(days=1), max(dt) + datetime.timedelta(days=1)])
-    for event in list(sorted(set([item[1] for item in l]))):
-        l2 = [item for item in l if item[1] == event]  # build list for a given event ( GBYSPILLED or JOINSPILL really )
-        x = [i1[2] for i1 in l2]
-    y = [i3[3] for i3 in l2]
-    ax[i].plot(x, y, 'o', label=event)
-    ax[i].legend(loc=2, prop={'size': 7})
+        dt = [item[2] for item in l]
+        ax[i].set_xlim([min(dt) - datetime.timedelta(days=1), max(dt) + datetime.timedelta(days=1)])
+        for event in list(sorted(set([item[1] for item in l]))):
+            l2 = [item for item in l if item[1] == event]  # build list for a given event ( GBYSPILLED or JOINSPILL really )
+            x = [i1[2] for i1 in l2]
+            y = [i3[3] for i3 in l2]
+            ax[i].plot(x, y, 'o', label=event)
+            ax[i].legend(loc=2, prop={'size': 7})
 
 
     plt.tight_layout(rect=[0, 0, 1, 0.95])
@@ -637,24 +637,20 @@ def exec_mem_rejects(msg):
         ax[i].xaxis.set_major_locator(DayLocator())
         ax[i].xaxis.set_major_formatter(DateFormatter('%b %d(%a)'))
         ax[i].xaxis.set_minor_locator(HourLocator(np.arange(0, 25, 6)))
-    ax[i].set_xlim([datetime.date.today() - datetime.timedelta(days=args.days, hours=1),
+        ax[i].set_xlim([datetime.date.today() - datetime.timedelta(days=args.days, hours=1),
                     datetime.date.today() + datetime.timedelta(hours=1)])
-
-    l = [item for item in points if item[0] == pool]
-    for j, result_type in enumerate(list(set([item[2] for item in l]))):
-        l2 = [item for item in l if item[2] == result_type]
-        x = [item[3] for item in l2]
-        y = [item[5] for item in l2]
-        z = [item[4] for item in l2]
-        ax[i].plot(x, y, "o", label=result_type, markersize=10)
-        ax_sec[i].plot(x, z, "-", label="wait(s)")
+        l = [item for item in points if item[0] == pool]
+        for j, result_type in enumerate(list(set([item[2] for item in l]))):
+            l2 = [item for item in l if item[2] == result_type]
+            x = [item[3] for item in l2]
+            y = [item[5] for item in l2]
+            z = [item[4] for item in l2]
+            ax[i].plot(x, y, "o", label=result_type, markersize=10)
+            ax_sec[i].plot(x, z, "-", label="wait(s)")
 
     ax[i].legend(loc=2, prop={'size': 9})
-    # ax[i].set_ylim(bottom=0)
     ax_sec[i].set_ylabel('Wait(sec)')
     ax_sec[i].legend(loc=1, prop={'size': 9})
-
-
     ax_sec[i].set_ylim(bottom=0)
 
     plt.tight_layout(rect=[0, 0, 1, 0.97])
@@ -803,25 +799,25 @@ def exec_bucket(msg):
         ax[i].set_title(pool, y=0.80, weight='bold')
         ax[i].set_ylabel('Query count')
         days = list(set([item[1] for item in l]))
-    days_int = [v.timetuple().tm_yday for v in days]
-    r1 = []
-    r2 = []
-    for j, c in enumerate(categories):
-        x = [v[1].timetuple().tm_yday for v in l if v[2] == c]
-        y = [item[3] for item in l if item[2] == c]
-        rects = ax[i].bar([k + j * width for k in x], y, width, color=colors[j], label=c)
-    if len(x) > 0:
-        r1.append(rects[0])
-    r2.append(c)
-    # Set the position of the x ticks
+        days_int = [v.timetuple().tm_yday for v in days]
+        r1 = []
+        r2 = []
+        for j, c in enumerate(categories):
+            x = [v[1].timetuple().tm_yday for v in l if v[2] == c]
+            y = [item[3] for item in l if item[2] == c]
+            rects = ax[i].bar([k + j * width for k in x], y, width, color=colors[j], label=c)
+        if len(x) > 0:
+            r1.append(rects[0])
+        r2.append(c)
+        # Set the position of the x ticks
 
-    ax[i].set_xticks([p.timetuple().tm_yday + 1.5 * width for p in days])
-    # Set the labels for the x ticks
-    ax[i].set_xticklabels([d.strftime("%b %d(%a)") for d in days])
+        ax[i].set_xticks([p.timetuple().tm_yday + 1.5 * width for p in days])
+        # Set the labels for the x ticks
+        ax[i].set_xticklabels([d.strftime("%b %d(%a)") for d in days])
 
 
-    ax[i].legend(r1, r2)
-    ax[i].set_xlim(min(days_int) - width, max(days_int) + width * 7)
+        ax[i].legend(r1, r2)
+        ax[i].set_xlim(min(days_int) - width, max(days_int) + width * 7)
 
     plt.tight_layout(rect=[0, 0, 1, 0.97])
     plt.savefig("TIME_HIST")
