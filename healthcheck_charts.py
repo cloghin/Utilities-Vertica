@@ -89,8 +89,7 @@ def exec_memlarge(message):
     no_subplots = len(pools)
     if no_subplots == 1: no_subplots = 2  # add 1 subplot to workaorund the array type change when  plotting 1 subplot
     fig, ax = plt.subplots(figsize=(15, 2.5 * no_subplots), nrows=no_subplots)
-    fig.suptitle(
-        "HighMem Queries(Granted,Failed&Retried,Failed)(EDT)\nUsed mem > " + budget_factor + " * budget & mem(GB) > " + min_mem,
+    fig.suptitle("HighMem Queries(Granted,Failed&Retried,Failed)(EDT)\nUsed mem > {0} * budget & mem(GB) > {1}".format(budget_factor, min_mem),
         weight='bold', color='b', size=15)
 
     for i, pool in enumerate(sorted(pools)):
@@ -98,7 +97,7 @@ def exec_memlarge(message):
         budget = max([b[5] for b in l if b[5] >= 0])  # establish budget to show as horizontal line below
         ax[i].axhline(budget, color='r', linestyle='dotted')
         ax[i].grid(True)
-        ax[i].set_title(pool + " /budget:" + str(budget) + "(GB)", y=0.90)
+        ax[i].set_title("{0} /budget: {1} (GB)".format(pool, budget), y=0.90)
         ax[i].set_ylabel('Mem(GB)')
         ax[i].xaxis.set_major_locator(DayLocator())
         ax[i].xaxis.set_major_formatter(DateFormatter('%b %d(%a)'))
