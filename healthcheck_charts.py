@@ -220,7 +220,7 @@ def exec_memusage(message):
         dict[str(row[0])] = str(row[1]) + "G/" + str(row[2]) + "G/" + str(row[3]) + "/" + str(row[4]) + "/" + str(
             row[5])
     cur.close()
-    no_subplots = len(rows)  # cannot add subplots dynamically, so we need to count them ahead of time
+    no_subplots = len(rows)  #cannot add subplots dynamically, so we need to count them ahead of time
 
     cur = db.cursor()
     cur.execute("set session timezone ='America/New_York';")
@@ -229,9 +229,9 @@ def exec_memusage(message):
     sql = """SELECT pool_name,
                    date_trunc('{grain}',time)::timestamp as hour, 
                    max(reserved_memory_kb_max_value/1024/1024)::integer - 
-           CASE WHEN (max(reserved_memory_kb_max_value - declared_size_memory_kb_start_value)/1024/1024)::integer  > 0 then
+                    CASE WHEN (max(reserved_memory_kb_max_value - declared_size_memory_kb_start_value)/1024/1024)::integer  > 0 then
                                                 (max(reserved_memory_kb_max_value - declared_size_memory_kb_start_value)/1024/1024)::integer 
-                        ELSE  0 END as reservedsize,
+                    ELSE  0 END as reservedsize,
                    CASE WHEN (max(reserved_memory_kb_max_value - declared_size_memory_kb_start_value)/1024/1024)::integer  > 0 then
                                         (max(reserved_memory_kb_max_value - declared_size_memory_kb_start_value)/1024/1024)::integer 
                         ELSE  0 END as borrowedsize,
@@ -254,9 +254,9 @@ def exec_memusage(message):
     fig, ax = plt.subplots(figsize=(15, 2.5 * no_subplots),
                            nrows=no_subplots)  # no risk of having 1 subplot since at least general + sysdata + sysquery exist
     ax_sec = [a.twinx() for a in ax]
-    fig.suptitle(
-        args.grain.title() + " grain: Memory Summary/Conc.- (in EDT) by pool - " + args.host + "\n Excluded pools:" + pool_name_not_in + "\npool name - mem/maxmem/plannedconcurrency/maxconcurrency/priority",
-        weight='bold', size=15, color='b')
+    fig.suptitle("{0} grain: Memory Summary/Conc.- (in EDT) by pool - {1}\n "
+                "Excluded pools:{2}\npool name - mem/maxmem/plannedconcur/maxconcur/priority".format(args.grain.title(),args.host, pool_name_not_in),
+                weight='bold', size=15, color='b')
 
     xdata, ydata1, ydata2, ydata3 = [], [], [], []
 
@@ -268,7 +268,7 @@ def exec_memusage(message):
         ydata2 = [i3[3] for i3 in l]  # y axis, borrowed memory
         ydata3 = [i4[4] for i4 in l]  # y axis, concurrency
 
-        ax[i].stackplot(xdata, ydata1, ydata2, labels=('Reserved mem', 'Borrowed mem'))
+        ax[i].stackplot(xdata, ydata1, ydata2, labels=('Reserved mem', 'Borrowed mem') , colors = ('b','r') )
         ax[i].set_title(pool + " - " + dict.get(pool, "Missing pool"), weight='bold', y=0.80)
         ax[i].set_ylabel('Mem(GB)')
 
@@ -480,7 +480,7 @@ def exec_gcl(message):
                 X.wait_count,
                 X.max_wait_sec, 
                 Y.max_hold_sec
-       FROM
+          FROM
             (select date_trunc('hour',time)::timestamp as hour, 
              sum(case when description='Granted immediately' then 0 else 1 end) as wait_count,
              max(datediff('ss',start_time,time)) as max_wait_sec
@@ -719,11 +719,11 @@ def exec_timehist(msg):
                    count(*) 
                    FROM {dc}.requests_issued RI INNER JOIN {dc}.requests_completed RC USING(session_id,request_id) 
                WHERE RC.success IN (TRUE,FALSE)   AND RI.request_type  NOT IN ('SET','UTILITY','TRANSACTION')
-               AND datediff('second',RI.time,RC.time) > """ + threshold + """ 
+               AND datediff('second',RI.time,RC.time) > {t} 
                AND  date(RI.time) >=  current_Date - {days}
                GROUP BY 1,2,3 ) A 
                INNER JOIN users USING (user_name)
-               GROUP BY 1,2,3 ORDER BY 1,2,3""".format(days=args.days,dc=args.dcschema)
+               GROUP BY 1,2,3 ORDER BY 1,2,3""".format(days=args.days,dc=args.dcschema,t = threshold)
 
     if args.debug: print SQL
     cur.execute(SQL)
@@ -739,7 +739,7 @@ def exec_timehist(msg):
     if no_subplots == 1: no_subplots = 2
 
     fig, ax = plt.subplots(figsize=(15, 2.5 * no_subplots), nrows=no_subplots)
-    fig.suptitle("Query Histogram (runtime > " + threshold + " s) by pool", fontsize=15, color='b', weight='bold')
+    fig.suptitle("Query Histogram (runtime > {0} s) by pool".format(threshold), fontsize=15, color='b', weight='bold')
 
     width = 0.1
 
@@ -814,19 +814,17 @@ def get_studioCharts():
         print SQL
 
     cur.execute(SQL)
-    rows = cur.fetchall()
-    cur.close()
-    for row in rows:
+    for row in cur.fetchall():
         tripeaks_raw = row[0]
-    tripeaks_comp = row[1]
+        tripeaks_comp = row[1]
+    cur.close()
 
     cur = db.cursor()
     sql = """select RAW.studio, 
-                    case RAW.studio WHEN  'Casino Studio' then GB_RAW - """ + str(tripeaks_raw) + """ 
-                                 WHEN 'Tripeaks Studio' then GB_RAW + """ + str(tripeaks_raw) + """
+                    case RAW.studio WHEN  'Casino Studio' then GB_RAW - {traw} 
+                                    WHEN 'Tripeaks Studio' then GB_RAW + {traw}
                     else GB_RAW end as "Raw(GB)",
-                    case RAW.studio WHEN  'Casino Studio' then GB_COMP - """ + str(tripeaks_comp) + """ 
-                                                 WHEN 'Tripeaks Studio' then GB_COMP + """ + str(tripeaks_comp) + """
+                    case RAW.studio WHEN  'Casino Studio' then GB_COMP - {tripeaks_comp} {tripeaks_comp}
                                 else GB_COMP end as "Compressed(GB)"
                 FROM ( select CASE
                                 WHEN object_name  IN ( 'bingoapp','grandcasino','gsncom','gsnmobile','newapi','plumbee') THEN 'Casino Studio'
@@ -856,7 +854,7 @@ def get_studioCharts():
                                 ELSE 'Others' END as studio,
                         (sum(used_bytes)/1024/1024/1024)::numeric(14,2) as GB_COMP
                         FROM projection_storage 
-                        group by 1) COMP order by 2 DESC;"""
+                        group by 1) COMP order by 2 DESC """.format(traw=tripeaks_raw, tripeaks_comp=tripeaks_comp)
 
     if args.debug:
         print sql
@@ -908,9 +906,9 @@ def get_studioCharts():
     cur = db.cursor()
     sql = """select Y.studio, 
                       Y.dt as audit_date,
-                  (case Y.studio 	WHEN   'Casino Studio' then GB_RAW - C.tripeaks_events_gb
-                                  WHEN 'Tripeaks Studio' then GB_RAW + C.tripeaks_events_gb
-                                  ELSE GB_RAW END / 1024 )::numeric(14,2) as "Raw(TB)"
+                  (case Y.studio WHEN   'Casino Studio' then GB_RAW - C.tripeaks_events_gb
+                                 WHEN 'Tripeaks Studio' then GB_RAW + C.tripeaks_events_gb
+                                ELSE GB_RAW END / 1024 )::numeric(14,2) as "Raw(TB)"
                   FROM (select dt, CASE
                                       WHEN object_name  IN ( 'bingoapp','grandcasino','gsncom','gsnmobile','newapi','plumbee') THEN 'Casino Studio'
                                       WHEN object_name IN ( 'app_wofs','poker') THEN 'Vegas Studio'
@@ -1215,8 +1213,8 @@ def exec_canary():
     SQL = """SELECT status_time, 
           EXTRACT(epoch FROM run_length):: integer AS runtime_seconds 
           FROM newapi.run_status_history WHERE TYPE = 'gsnmobile_finalproc_kinesis' AND status = 'COMPLETE' 
-          AND status_time >= CURRENT_DATE - """ + str(args.days) + """ AND status_time <= CURRENT_DATE AND run_length IS NOT NULL 
-          ORDER BY status_time;"""
+          AND status_time >= CURRENT_DATE - {days} AND status_time <= CURRENT_DATE AND run_length IS NOT NULL 
+          ORDER BY status_time;""".format(days=args.days)
 
     cur.execute(SQL)
     if args.debug:
@@ -1321,14 +1319,12 @@ if args.db == None:
 if args.dcschema is None:
     args.dcschema = "dc"
 
-db = hp_vertica_client.connect(
-    "host=" + args.host + " database=" + args.db + " port=5433 user=dbadmin password=" + args.password)
+db = hp_vertica_client.connect("host={0} database={1} port=5433 user=dbadmin password={2}".format(args.host, args.db, args.password))
 msg = MIMEMultipart('related')
 
 me = "cloghin@bseatech.com"
 you = args.email
-msg['Subject'] = "Healthcheck charts (EST TZ)- " + str(args.host) + "-" + str(args.type) + "-" + str(
-    args.days) + " days"
+msg['Subject'] = "Healthcheck charts (EST TZ)- {0} -{1}-{2} days".format(args.host,args.type,args.days)
 msg['From'] = me
 msg['To'] = you
 
@@ -1351,7 +1347,7 @@ if args.type <> 'LICENSE':
     msgHtml = MIMEText(html, 'html')
     msg.attach(msgHtml)
 
-print "Starting execution at " + str(datetime.datetime.now())
+print "Starting execution at {0}".format(datetime.datetime.now())
 
 if args.type in ['MEM_LARGE', 'ALL']:
     exec_memlarge(msg)
