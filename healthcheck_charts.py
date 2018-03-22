@@ -160,7 +160,7 @@ def exec_wait(msg):
     if no_subplots == 1:  no_subplots = 2
 
     fig, ax = plt.subplots(figsize=(15, 2.5 * no_subplots), nrows=no_subplots)
-    fig.suptitle("RP Wait > " + wait_secs + "(sec)(EDT)", weight='bold', size=15, color='b')
+    fig.suptitle("RP Wait > {0}(sec)(EDT)".format(wait_secs), weight='bold', size=15, color='b')
 
     for i, pool in enumerate(sorted(pools)):
         l = [item for item in points if item[0] == pool]
@@ -437,7 +437,7 @@ def exec_spilled(message):
     no_subplots = 3
     # if no_subplots == 1):  no_subplots = 2
     fig, ax = plt.subplots(figsize=(15, 3.5 * no_subplots), nrows=no_subplots)
-    fig.suptitle("Execution Engine Events ( Mem > " + threshold + " GB)(EDT)", weight='bold', size=15, color='b')
+    fig.suptitle("Execution Engine Events ( Mem > {0} GB)(EDT)".format(threshold), weight='bold', size=15, color='b')
 
     for i, et in enumerate(sorted(events)):
         erows = [a for a in points if a[1] == et]  # list of rows for a given event
@@ -552,7 +552,7 @@ def exec_mem_rejects(msg):
 
     cur = db.cursor()
     cur.execute(
-        "select name,memorysize,maxmemorysize,plannedconcurrency,maxconcurrency FROM resource_pools where name NOT IN """ + pool_name_not_in + ";")
+        "select name,memorysize,maxmemorysize,plannedconcurrency,maxconcurrency FROM resource_pools where name NOT IN {0}".format(pool_name_not_in))
     rows = cur.fetchall()
 
     dict = {}
@@ -573,11 +573,11 @@ def exec_mem_rejects(msg):
          min(time)::timestamp  as time,
          max(datediff('second',start_time,time))::numeric(9,2) as wait_secs,
          (max(memory_kb)/1024/1024)::numeric(9,2) AS GB_requested
-        FROM """ + str(args.dcschema) + """.resource_acquisitions 
-        WHERE time > current_date -""" + str(args.days) + """
+        FROM {days}.resource_acquisitions 
+        WHERE time > current_date - {days}
         AND pool_name NOT IN """ + pool_name_not_in + """ 
             AND  result not in ('Granted') 
-        GROUP BY 1,2,3 ORDER BY 1,2 ;"""
+        GROUP BY 1,2,3 ORDER BY 1,2 ;""".format(days=args.days, dc=args.dcschema)
 
     if args.debug: print SQL
     cur.execute(SQL)
@@ -644,10 +644,10 @@ def exec_objlock(msg):
                       count(*) as lockcount,
                       max(datediff('ss',start_time,time))  as max_wait
                 FROM  dc_lock_attempts
-                WHERE regexp_like(object_name,'""" + str(args.tbname) + """') 
-                AND time >= (current_date - """ + str(args.days) + """)
+                WHERE regexp_like(object_name,'{tbname}') 
+                AND time >= (current_date - {days} )
                 AND datediff('ss',start_time,time) > 0 
-                GROUP BY 1,2 order by 1,2 ;"""
+                GROUP BY 1,2 order by 1,2 """.format(tbname=args.tbname, days=args.days)
 
     if args.debug: print sql
     cur.execute(sql)
@@ -840,11 +840,10 @@ def get_studioCharts():
                                                 row_number() over (partition by object_name order by audit_start_timestamp desc ) as rn 
                                                 from user_audits where object_type ='SCHEMA' and audit_start_timestamp > current_date - 100 
                                     ) A where A.rn = 1 and size_bytes > 0 
-                        ) X 
-                            GROUP BY 1 
+                        ) X  GROUP BY 1 
                     ) RAW
                         NATURAL JOIN        
-                        ( select CASE
+                        (select CASE
                                 WHEN projection_schema IN ( 'bingoapp','grandcasino','gsncom','gsnmobile','newapi','plumbee') THEN 'Casino Studio'
                                 WHEN projection_schema IN ( 'app_wofs','poker') THEN 'Vegas Studio'
                                 WHEN projection_schema IN ( 'arena','ww') THEN 'Skill Studio'
@@ -852,7 +851,7 @@ def get_studioCharts():
                                 WHEN projection_schema IN ( 'tripeaksapp') THEN 'Tripeaks Studio'
                                 ELSE 'Others' END as studio,
                         (sum(used_bytes)/1024/1024/1024)::numeric(14,2) as GB_COMP
-                        FROM projection_storage 
+                          FROM projection_storage 
                         group by 1) COMP order by 2 DESC """.format(traw=tripeaks_raw, tripeaks_comp=tripeaks_comp)
 
     if args.debug:
@@ -1163,7 +1162,6 @@ def get_trend():
     ax[2].grid(True)
 
     ax[1].axhline(license, color='g', label="License size", linewidth=3)
-    # ax[2].axhline(license,color='g', label="License size",linewidth=3)
 
     ax[1].set_title("Top 10 tables growth trend (TiB)", weight='bold', y=0.90)
     ax[2].set_title("Top 11-25 tables growth trend (TiB)", weight='bold', y=0.90)
