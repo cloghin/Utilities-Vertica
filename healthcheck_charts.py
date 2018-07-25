@@ -823,7 +823,7 @@ def get_studioCharts():
                     case RAW.studio WHEN  'Casino Studio' then GB_RAW - {traw} 
                                     WHEN 'Tripeaks Studio' then GB_RAW + {traw}
                     else GB_RAW end as "Raw(GB)",
-                    case RAW.studio WHEN  'Casino Studio' then GB_COMP - {tripeaks_comp} {tripeaks_comp}
+                    case RAW.studio WHEN  'Casino Studio' then GB_COMP - {tripeaks_comp}
                                 else GB_COMP end as "Compressed(GB)"
                 FROM ( select CASE
                                 WHEN object_name  IN ( 'bingoapp','grandcasino','gsncom','gsnmobile','newapi','plumbee') THEN 'Casino Studio'
@@ -1448,6 +1448,7 @@ if args.type <> 'LICENSE':
         <img src="cid:wait"><BR>
         <img src="cid:objlock"><BR>
         <img src="cid:bucket"><BR>
+        <img src="cid:memlarge"><BR>
         <img src="cid:tm"><BR>
         </p>"""
     # Record the MIME types.
