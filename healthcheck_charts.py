@@ -573,11 +573,11 @@ def exec_mem_rejects(msg):
          min(time)::timestamp  as time,
          max(datediff('second',start_time,time))::numeric(9,2) as wait_secs,
          (max(memory_kb)/1024/1024)::numeric(9,2) AS GB_requested
-        FROM {days}.resource_acquisitions 
+        FROM {dc}.resource_acquisitions 
         WHERE time > current_date - {days}
-        AND pool_name NOT IN """ + pool_name_not_in + """ 
+        AND pool_name NOT IN {poolsnot} 
             AND  result not in ('Granted') 
-        GROUP BY 1,2,3 ORDER BY 1,2 ;""".format(days=args.days, dc=args.dcschema)
+        GROUP BY 1,2,3 ORDER BY 1,2 ;""".format(days=args.days, dc=args.dcschema, poolsnot=pool_name_not_in)
 
     if args.debug: print SQL
     cur.execute(SQL)
@@ -1249,6 +1249,114 @@ def exec_canary():
     msgImg.add_header('Content-Disposition', 'inline', filename='CANARY.png')
     msg.attach(msgImg)
 
+def exec_tm(msg):
+    cur = db.cursor()
+    cur.execute("set session timezone ='America/New_York';")
+
+    cur = db.cursor()
+
+    # SQL ="""SELECT date_trunc('hour',S.operation_start_timestamp)::timestamp as hour
+ 	# 		,S.operation_name
+ 	# 		,S.node_name
+ 	# 		,avg(datediff ( 'second', S.operation_start_timestamp, C.operation_start_timestamp ))::numeric(14,2) as duration
+ 	# 	    ,avg(S.total_ros_used_bytes/1024/1024/1024)::numeric(14,2) as GB
+    #         FROM tuple_mover_operations S inner join tuple_mover_operations C
+    #             USING (node_name, projection_id, session_id, transaction_id )
+    #         WHERE S.operation_status='Start' and C.operation_status ='Complete'
+    #         AND  S.operation_start_timestamp >  CURRENT_DATE - {days}
+    #         and regexp_like(S.node_name , 'v_db_node000[123456789]')
+    #         AND datediff ('second', S.operation_start_timestamp, C.operation_start_timestamp) > 0
+    #         group by 1,2,3 order by 1""".format(days=args.days)
+
+    #get selective nodes to plot ( Top 5 mergeouts by time)
+    SQL1= """SELECT S.node_name
+ 		    FROM tuple_mover_operations S inner join tuple_mover_operations C 
+                USING (node_name, projection_id, session_id, transaction_id ) 
+            WHERE S.operation_status='Start' and C.operation_status ='Complete'
+            and S.operation_name ='Mergeout' and C.operation_name ='Mergeout'
+            AND  S.operation_start_timestamp >=  CURRENT_DATE - {days}
+            AND datediff ('second', S.operation_start_timestamp, C.operation_start_timestamp) > 60 
+            ORDER BY datediff ('second', S.operation_start_timestamp, C.operation_start_timestamp)  desc limit 5 """.format(days=args.days)
+
+    cur.execute(SQL1)
+    if args.debug:
+        print SQL1
+    highnodes =""
+    if (cur.rowcount > 0):
+        rows = cur.fetchall()
+        for row in rows:
+            highnodes += "'{0}',".format(row[0])
+    cur.close()
+
+
+    SQL = """SELECT 
+ 		    S.operation_start_timestamp::timestamp,
+ 		    (datediff ('second', S.operation_start_timestamp, C.operation_start_timestamp )/60)::numeric(14,2) as min , 
+ 		    (S.total_ros_used_bytes/1024/1024/1024)::numeric(14,2) as GB,
+ 		    S.node_name
+ 		    FROM tuple_mover_operations S inner join tuple_mover_operations C 
+                USING (node_name, projection_id, session_id, transaction_id ) 
+            WHERE S.operation_status='Start' and C.operation_status ='Complete'
+            and S.operation_name ='Mergeout' and C.operation_name ='Mergeout'
+            AND  S.operation_start_timestamp >=  CURRENT_DATE - {days}
+            and (regexp_like(S.node_name , 'v_{db}_node000[1357]') OR S.node_name in ({hn}) )
+            and (regexp_like(C.node_name , 'v_{db}_node000[1357]') OR C.node_name in ({hn}) )
+            AND datediff ('second', S.operation_start_timestamp, C.operation_start_timestamp) > 60
+            order by  1 ASC""".format(days=args.days,db=args.db,hn=highnodes[:-1])
+
+    cur = db.cursor()
+    if args.debug:
+        print SQL
+    cur.execute(SQL)
+
+    points = []
+    if (cur.rowcount > 0):
+        rows = cur.fetchall()
+        for row in rows:
+            points.append(row)
+    cur.close()
+
+    # get number of subplots based on distinct pool_name(s)
+    nodes  = list(set([item[3] for item in points]))
+    no_subplots = len(nodes)
+    if no_subplots == 1: no_subplots = 2  # add 1 subplot to workaorund the array type change when  plotting 1 subplot
+    fig, ax = plt.subplots(figsize=(15, 2.5 * no_subplots), nrows=no_subplots)
+
+    ax_sec = [a.twinx() for a in ax]
+    fig.suptitle("TM performance(EDT)", fontsize=15, color='b', weight='bold')
+
+    for i, node in enumerate(sorted(nodes)): #each subplot
+        ax[i].grid(True)
+        ax[i].set_ylabel('Duration')
+        ax[i].set_title(node, y=0.9, weight='bold')
+        # format the ticks
+        ax[i].xaxis.set_major_locator(DayLocator())
+        ax[i].xaxis.set_major_formatter(DateFormatter('%b %d-%a'))
+        ax[i].xaxis.set_minor_locator(HourLocator(np.arange(0, 25, 6)))
+        ax[i].set_xlim([datetime.date.today() - datetime.timedelta(days=args.days), datetime.date.today()])
+        nodepoints = [a for a in points if a[3] == node]
+
+        x =  [a[0] for a in nodepoints]
+        y2 = [a[2] for a in nodepoints]
+        y1 = [a[1] for a in nodepoints]
+
+        ax[i].plot(x, y1,'b', label="Elapsedtime")
+        ax_sec[i].plot(x, y2,'r', label="Size(GB)")
+
+        ax[i].legend(loc=2, prop={'size': 9})
+        ax_sec[i].set_ylabel('Ros size')
+        ax_sec[i].legend(loc=1, prop={'size': 9})
+        ax_sec[i].set_ylim(bottom=0)
+
+    plt.tight_layout(rect=[0, 0, 1, 0.97])
+    plt.savefig("TM")
+
+    img = open('TM.png', 'rb').read()
+    msgImg = MIMEImage(img, 'png')
+    msgImg.add_header('Content-ID', '<tm>')
+    msgImg.add_header('Content-Disposition', 'inline', filename='TM.png')
+    msg.attach(msgImg)
+
 
 def getstyle(s):
     if s <= 15:
@@ -1282,6 +1390,7 @@ parser.add_argument('--type',
                 LICENSE     => based on license_audits & user_audits shows various license usage charts 
                 TREND	    => based on license_audits + user audits show DB / Top 25 tables trends
                 CANARY      => based on  a standard ETL query to check performance over time
+                TM          => based on  tuple_mover_operation ( tuple mover performance)
                 ALL         => include all of the above charts """)
 parser.add_argument('--password',
                     help='vertica dbadmin\'s password')
@@ -1339,6 +1448,7 @@ if args.type <> 'LICENSE':
         <img src="cid:wait"><BR>
         <img src="cid:objlock"><BR>
         <img src="cid:bucket"><BR>
+        <img src="cid:tm"><BR>
         </p>"""
     # Record the MIME types.
     msgHtml = MIMEText(html, 'html')
@@ -1370,6 +1480,8 @@ if args.type in ['TREND']:
     get_trend()
 if args.type in ['CANARY', 'ALL']:
     exec_canary()
+if args.type in ['TM', 'ALL']:
+    exec_tm(msg)
 
 db.close()
 
