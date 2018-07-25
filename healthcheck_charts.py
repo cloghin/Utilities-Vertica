@@ -1340,7 +1340,7 @@ def exec_tm(msg):
         y2 = [a[2] for a in nodepoints]
         y1 = [a[1] for a in nodepoints]
 
-        ax[i].plot(x, y1,'b', label="Elapsedtime")
+        ax[i].plot(x, y1,'b', label="Elapsedtime(min)")
         ax_sec[i].plot(x, y2,'r', label="Size(GB)")
 
         ax[i].legend(loc=2, prop={'size': 9})
