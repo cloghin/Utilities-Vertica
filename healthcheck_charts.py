@@ -300,6 +300,7 @@ def exec_memusage(message):
 
 
 def exec_label(message):
+
     # ability to check execution time + memory usage + any spilling + retries + any other special event occurred on this pattern of queries
     # can leverage either a set of labels or a sql pattern
     # add also a report where we pass in a transaction_id / statement_id and get back EEP data , planning data , query plan in table + chart format
@@ -309,6 +310,7 @@ def exec_label(message):
     cur.execute("set session timezone ='America/New_York';")
 
     cur = db.cursor()
+
     sql =  """select  label, s.time as starttime,
                    datediff('second',s.time,f.time) as duration,
                    sub.mem_gb
@@ -1299,8 +1301,8 @@ def exec_tm(msg):
             WHERE S.operation_status='Start' and C.operation_status ='Complete'
             and S.operation_name ='Mergeout' and C.operation_name ='Mergeout'
             AND  S.operation_start_timestamp >=  CURRENT_DATE - {days}
-            and (regexp_like(S.node_name , 'v_{db}_node000[1357]') OR S.node_name in ({hn}) )
-            and (regexp_like(C.node_name , 'v_{db}_node000[1357]') OR C.node_name in ({hn}) )
+            and (regexp_like(S.node_name , 'v_{db}_node000[135]') /*OR S.node_name in ({hn}) */)
+            and (regexp_like(C.node_name , 'v_{db}_node000[135]') /* OR C.node_name in ({hn})*/ )
             AND datediff ('second', S.operation_start_timestamp, C.operation_start_timestamp) > 60
             order by  1 ASC""".format(days=args.days,db=args.db,hn=highnodes[:-1])
 
@@ -1410,6 +1412,8 @@ parser.add_argument('--grain', default='hour',
                     help='grain for mem usage : hour/minute, default hour')
 parser.add_argument('--debug', help='produce verbose info', action='store_true')
 parser.add_argument('--noaudit', help='eliminate audit phase for testing', action='store_true')
+parser.add_argument('--user', help='username', default='dbadmin')
+parser.add_argument('--port', help='port', default='5433')
 
 args = parser.parse_args()
 if args.host == None:
@@ -1425,7 +1429,7 @@ if args.db == None:
 if args.dcschema is None:
     args.dcschema = "dc"
 
-db = hp_vertica_client.connect("host={0} database={1} port=5433 user=dbadmin password={2}".format(args.host, args.db, args.password))
+db = hp_vertica_client.connect("host={0} database={1} port={4} user={3} password={2}".format(args.host, args.db, args.password,args.user, args.port))
 msg = MIMEMultipart('related')
 
 me = "cloghin@bseatech.com"
