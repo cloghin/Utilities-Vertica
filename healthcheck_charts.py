@@ -785,184 +785,12 @@ def exec_timehist(msg):
     msg.attach(msgImg)
 
 
-def get_studioCharts():
-    if not args.noaudit:
-        cur = db.cursor()
-        cur.execute(
-            """select 'select audit('''||x||''');' FROM (select distinct table_schema as x
-              from tables UNION ALL select 'gsnmobile.events') T ;""")
-        rows = cur.fetchall()
-        cur.close()
-        for row in rows:
-            print row
-            cur = db.cursor()
-            cur.execute(row[0])
-            cur.close()
-
-    # studio breakdown CHART 1  - tripeaks license allocation
-    cur = db.cursor()
-    SQL = """	select ((X.count/TOT.count)* RAW.gb)::numeric(14,2) as raw_gb,
-                ((X.count/TOT.count)* COMP.gb)::numeric(14,2) as comp_gb
-                FROM (select  count(*) from gsnmobile.events where app_name = 'TriPeaks Solitaire' ) X 
-                CROSS JOIN  (select size_bytes/1024/1024/1204 as gb from user_audits  
-                        where object_schema='gsnmobile' and object_name ='events' and audit_end_timestamp > current_Date -25
-                        order by audit_end_timestamp DESC limit 1
-                        ) RAW  
-                CROSS JOIN (select sum(used_bytes)/1024/1024/1024 as gb from projection_storage where projection_schema='gsnmobile' and anchor_Table_name='events' ) COMP
-                CROSS JOIN (select count(*) from gsnmobile.events ) TOT;"""
-
-    if (args.debug):
-        print SQL
-
-    cur.execute(SQL)
-    for row in cur.fetchall():
-        tripeaks_raw = row[0]
-        tripeaks_comp = row[1]
-    cur.close()
-
-    cur = db.cursor()
-    sql = """select RAW.studio, 
-                    case RAW.studio WHEN  'Casino Studio' then GB_RAW - {traw} 
-                                    WHEN 'Tripeaks Studio' then GB_RAW + {traw}
-                    else GB_RAW end as "Raw(GB)",
-                    case RAW.studio WHEN  'Casino Studio' then GB_COMP - {tripeaks_comp}
-                                else GB_COMP end as "Compressed(GB)"
-                FROM ( select CASE
-                                WHEN object_name  IN ( 'bingoapp','grandcasino','gsncom','gsnmobile','newapi','plumbee') THEN 'Casino Studio'
-                                WHEN object_name IN ( 'app_wofs','poker') THEN 'Vegas Studio'
-                                WHEN object_name IN ( 'arena','ww') THEN 'Skill Studio'
-                                WHEN object_name IN ( 'bash') THEN 'Bingo Studio'
-                                WHEN object_name IN ( 'tripeaksapp') THEN 'Tripeaks Studio'
-                                ELSE 'Others' END as studio,
-                            (sum(size_bytes)/1024/1024/1024)::numeric(14,2) as GB_RAW
-                            FROM (
-                                    select A.object_name, A.size_bytes from 
-                                    (  select  object_name, 
-                                                max(size_bytes) over (partition by object_name order by audit_start_timestamp desc ) as size_bytes,
-                                                row_number() over (partition by object_name order by audit_start_timestamp desc ) as rn 
-                                                from user_audits where object_type ='SCHEMA' and audit_start_timestamp > current_date - 100 
-                                    ) A where A.rn = 1 and size_bytes > 0 
-                        ) X  GROUP BY 1 
-                    ) RAW
-                        NATURAL JOIN        
-                        (select CASE
-                                WHEN projection_schema IN ( 'bingoapp','grandcasino','gsncom','gsnmobile','newapi','plumbee') THEN 'Casino Studio'
-                                WHEN projection_schema IN ( 'app_wofs','poker') THEN 'Vegas Studio'
-                                WHEN projection_schema IN ( 'arena','ww') THEN 'Skill Studio'
-                                WHEN projection_schema IN ( 'bash') THEN 'Bingo Studio'
-                                WHEN projection_schema IN ( 'tripeaksapp') THEN 'Tripeaks Studio'
-                                ELSE 'Others' END as studio,
-                        (sum(used_bytes)/1024/1024/1024)::numeric(14,2) as GB_COMP
-                          FROM projection_storage 
-                        group by 1) COMP order by 2 DESC """.format(traw=tripeaks_raw, tripeaks_comp=tripeaks_comp)
-
-    if args.debug:
-        print sql
-
-    cur.execute(sql)
-    rows = cur.fetchall()
-    cur.close()
-    fig, ax = plt.subplots()
-
-    xdata, ydata1, ydata2 = [], [], []
-    for index, row in enumerate(rows):
-        xdata.append(row[0])  # studio
-        ydata1.append(int(row[1]))  # raw_gb
-        ydata2.append(int(row[2]))  # comp_gb
-
-    vsql_args = ["vsql", "-h", args.host, "-U", "dbadmin", "-w", args.password, "-HXc"]
-    p = Popen(vsql_args + [sql], stdout=PIPE)
-    (sqlhtml, err) = p.communicate()
-    html = "<img src=\"cid:STUDIO\"><BR>" + sqlhtml
-
-    ind = np.arange(index + 1)
-    width = 0.45
-    y11 = [y / 1024.0 for y in ydata1]
-    y22 = [y / 1024.0 for y in ydata2]
-    rects1 = ax.barh(ind, y11, width, color='r')
-    rects2 = ax.barh(ind + width, y22, width, color='y')
-    # add some text for labels, title and axes ticks
-    ax.set_xlabel('Storage (TiB)')
-    ax.set_title('Space usage by studio (TiB)')
-    ax.set_yticks(ind + width)
-    ax.set_yticklabels(xdata)
-    ax.xaxis.set_major_formatter(matplotlib.ticker.FuncFormatter(lambda x, p: format(int(x), ',')))
-    ax.legend((rects2[0], rects1[0]), ('Compressed (TiB)', 'License-Raw (TiB)'))
-
-    autolabel(ax, rects1, 2)
-    autolabel(ax, rects2, 2)
-    plt.savefig("STUDIO")
-
-    # Chart 2 -  studio pie-chart
-    fig, ax = plt.subplots()
-    ax.pie(ydata1, labels=xdata, autopct='%1.1f%%', shadow=False)
-    ax.axis('equal')  # Equal aspect ratio ensures that pie is drawn as a circle.
-    plt.title('License Allocation by Studio', y=1.05, weight='bold')
-    plt.savefig("PIE_STUDIO")
-
-    html += "<img src=\"cid:PIE_STUDIO\"><BR>"
-
-    # Chart 3  - historical studio report
-    cur = db.cursor()
-    sql = """select Y.studio, 
-                      Y.dt as audit_date,
-                  (case Y.studio WHEN   'Casino Studio' then GB_RAW - C.tripeaks_events_gb
-                                 WHEN 'Tripeaks Studio' then GB_RAW + C.tripeaks_events_gb
-                                ELSE GB_RAW END / 1024 )::numeric(14,2) as "Raw(TB)"
-                  FROM (select dt, CASE
-                                      WHEN object_name  IN ( 'bingoapp','grandcasino','gsncom','gsnmobile','newapi','plumbee') THEN 'Casino Studio'
-                                      WHEN object_name IN ( 'app_wofs','poker') THEN 'Vegas Studio'
-                                      WHEN object_name IN ( 'arena','ww') THEN 'Skill Studio'
-                                      WHEN object_name IN ( 'bash') THEN 'Bingo Studio'
-                                      WHEN object_name IN ( 'tripeaksapp') THEN 'Tripeaks Studio'
-                                      ELSE 'Others' END as studio,
-                              (sum(size_bytes)/1024/1024/1024)::numeric(14,2) as  GB_RAW
-                              FROM ( select date(audit_end_timestamp) as dt, object_name, max(size_bytes) as size_bytes from user_audits 
-                                  where object_type ='SCHEMA' GROUP BY 1,2) X GROUP BY 1,2 )  Y
-                      NATURAL JOIN (	select A.date as dt , A.gb * B.pct as tripeaks_events_gb from (select date(audit_end_timestamp), avg( size_bytes/1024/1024/1204) as gb 
-                      from user_audits where object_schema='gsnmobile' and object_name ='events' group by 1) A 
-                      CROSS JOIN 
-                  ( select  (select count(*) from gsnmobile.events where app_name = 'TriPeaks Solitaire')/(select count(*)  from gsnmobile.events) as pct from dual ) B ) C order by 1,2 ;"""
-    if args.debug:
-        print sql
-    cur.execute(sql)
-    rows = cur.fetchall()
-    cur.close()
-
-    points = []
-    for r in rows:
-        points.append(r)
-
-    studios = list(sorted(set([item[0] for item in points])))
-    no_subplots = len(studios)
-    fig, ax = plt.subplots(figsize=(15, 2.5 * no_subplots), nrows=no_subplots)
-    fig.suptitle("Historical License usage by studio-TB", weight='bold', color='b', size=15)
-
-    for i, studio in enumerate(studios):
-        x = [item[1] for item in points if item[0] == studio]
-        y = [item[2] for item in points if item[0] == studio]
-        ax[i].plot(x, y, "-", label=studio, linewidth=2)
-        ax[i].set_ylabel('License(TB)')
-        ax[i].grid(True)
-        ax[i].set_title(studio, y=0.85, weight='bold')
-        # format the ticks
-        ax[i].xaxis.set_major_locator(MonthLocator())
-        ax[i].xaxis.set_major_formatter(DateFormatter('%b %Y'))
-    plt.savefig("STUDIO_HISTORY")
-
-    # print get_html(field_names,xdata,ydata1,ydata2)
-    vsql_args = ["vsql", "-h", args.host, "-U", "dbadmin", "-w", args.password, "-HXc"]
-    p = Popen(vsql_args + [sql], stdout=PIPE)
-    (sqlhtml, err) = p.communicate()
-
-    html += "<img src=\"cid:STUDIO_HISTORY\"><BR>" + sqlhtml
-    return html
 
 
 def exec_license(msg):
     # execute an audit every time we execute the report, this may take some 10-20 min,
     # unless noaudit is specified
-    html = get_studioCharts()
+    html = ""
 
     # Chart 4 - schema breakdown
     cur = db.cursor()
@@ -1075,7 +903,7 @@ def exec_license(msg):
     msg.attach(msgHtml)
     msg['Subject'] = "DB License Monthly Charts(EST TZ)- " + str(args.host) + "-" + str(args.type)
 
-    for i in ['STUDIO', 'PIE_STUDIO', 'STUDIO_HISTORY', 'SCHEMA', 'LICENSE', 'TREND']:
+    for i in [ 'SCHEMA', 'LICENSE', 'TREND']:
         msgImg = MIMEImage(open(i + '.png', 'rb').read(), 'png')
         msgImg.add_header('Content-ID', '<' + i + '>')
         msgImg.add_header('Content-Disposition', 'inline', filename='"+i+".png')
@@ -1209,11 +1037,9 @@ def exec_canary():
     cur.execute("set session timezone ='America/New_York';")
 
     cur = db.cursor()
-    SQL = """SELECT status_time, 
-          EXTRACT(epoch FROM run_length):: integer AS runtime_seconds 
-          FROM newapi.run_status_history WHERE TYPE = 'gsnmobile_finalproc_kinesis' AND status = 'COMPLETE' 
-          AND status_time >= CURRENT_DATE - {days} AND status_time <= CURRENT_DATE AND run_length IS NOT NULL 
-          ORDER BY status_time;""".format(days=args.days)
+    SQL = """SELECT time,runtime 
+          FROM <table>
+          AND time >= CURRENT_DATE - {days};""".format(days=args.days)
 
     cur.execute(SQL)
     if args.debug:
@@ -1230,7 +1056,7 @@ def exec_canary():
     xdata = [p[0] for p in points]
     ydata = [p[1] for p in points]
 
-    ax.plot(xdata, ydata, "-", label="gsnmobile-finalproc")
+    ax.plot(xdata, ydata, "-", label="canary_query")
 
     ax.set_title('Canary query for Cluster performance', y=0.90, weight='bold')
     ax.set_ylabel('Runtime(sec)')
@@ -1257,18 +1083,6 @@ def exec_tm(msg):
 
     cur = db.cursor()
 
-    # SQL ="""SELECT date_trunc('hour',S.operation_start_timestamp)::timestamp as hour
- 	# 		,S.operation_name
- 	# 		,S.node_name
- 	# 		,avg(datediff ( 'second', S.operation_start_timestamp, C.operation_start_timestamp ))::numeric(14,2) as duration
- 	# 	    ,avg(S.total_ros_used_bytes/1024/1024/1024)::numeric(14,2) as GB
-    #         FROM tuple_mover_operations S inner join tuple_mover_operations C
-    #             USING (node_name, projection_id, session_id, transaction_id )
-    #         WHERE S.operation_status='Start' and C.operation_status ='Complete'
-    #         AND  S.operation_start_timestamp >  CURRENT_DATE - {days}
-    #         and regexp_like(S.node_name , 'v_db_node000[123456789]')
-    #         AND datediff ('second', S.operation_start_timestamp, C.operation_start_timestamp) > 0
-    #         group by 1,2,3 order by 1""".format(days=args.days)
 
     #get selective nodes to plot ( Top 5 mergeouts by time)
     SQL1= """SELECT S.node_name
@@ -1381,7 +1195,7 @@ parser.add_argument('--days', type=int,
 parser.add_argument('--type',
                     help="""report type to send 
                 MEM_SUMMARY => based on dc_resource_pool_status_by_{hour|minute} shows memory usage/concurrency by pool
-                MEM_LARGE   => based on dc.resource_acquisitions shows queries above their budget
+                MEM_LARGE   => based on dc.resource_acquisitions( + dc.query_summary_hist) shows queries above their budget
                 MEM_REJECTS => based on dc.resource_acquisitions shows queries that were rejected due to unavailability of resources
                 MEM_SPILLS  => based on dc_execution_engine_events whows JOIN and GROUP BY spills 
                 MEM_WAITS   => based on dc.resource_acquisitions shows queries 
@@ -1483,7 +1297,7 @@ if args.type in ['TIME_HIST', 'ALL']:
     exec_timehist(msg)
 if args.type in ['TREND']:
     get_trend()
-if args.type in ['CANARY', 'ALL']:
+if args.type in ['CANARY']:
     exec_canary()
 if args.type in ['TM', 'ALL']:
     exec_tm(msg)
