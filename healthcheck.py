@@ -122,7 +122,7 @@ def getTopMemoryQueries():
     prettyprint(sql)
 
 parser = argparse.ArgumentParser(description='Cluster performance - Txt Version',formatter_class=argparse.RawTextHelpFormatter)
-parser.add_argument('--email',default='cloghin@gsn.com', help='email address to send report to')
+parser.add_argument('--email', help='email address to send report to')
 parser.add_argument('--config',default='gsn', help='company')
 parser.add_argument('--debug', help='produce verbose info', action='store_true')
 parser.add_argument('--days', default=3, help='days backwards')
